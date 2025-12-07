@@ -1,0 +1,11 @@
+Dependencias instaladas :
+	express - npm install express
+	nodemon - npm install --save-dev nodemon
+	dotenv - npm install dotenv
+	cors - npm install cors
+	Morgan - npm install morgan
+	postgresql - npm i pg
+	multer - npm i multer xlsx
+	Excelks - npm i exceljs
+
+
