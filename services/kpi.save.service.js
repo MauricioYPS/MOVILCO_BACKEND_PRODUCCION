@@ -1,7 +1,4 @@
-/**************************************************************
- * KPI SAVE SERVICE — Versión FINAL y compatible con toda 
- * la arquitectura KPI extendida (ventas_detalle incluidas).
- **************************************************************/
+
 
 import pool from "../config/database.js";
 import { calculateKpiForPeriod } from "./kpi.calculate.service.js";
@@ -124,7 +121,7 @@ export async function saveKpiForPeriod(period) {
 
   } catch (e) {
     await client.query("ROLLBACK");
-    console.error("\n[🔥 KPI SAVE ERROR]", e);
+    console.error("\n[ KPI SAVE ERROR]", e);
     throw e;
   } finally {
     client.release();

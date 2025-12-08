@@ -1,62 +1,50 @@
-// services/kpi.get.service.js
 import pool from "../config/database.js";
 import { parseSiappDate } from "../utils/parse-date-siapp.js";
 
 /**
- * KPI GET — versión optimizada con:
- *  - 1 sola query para ventas
- *  - recalculo completo por asesor
- *  - filtros reales por fecha (YYYY-MM)
- *  - details=true/false
+ * KPI GET — versión final corregida para mostrar:
+ *  - TODAS las ventas del SIAPP (full + generated)
+ *  - Todos los campos del detalle
+ *  - Ventas manuales creadas desde tu sistema
  */
 export async function getKpiForPeriod(period, filters = {}) {
 
-  if (!period) throw new Error("Falta ?period=YYYY-MM");
-
+  // ----------------------------
+  // VALIDAR PERIODO
+  // ----------------------------
   const match = String(period).match(/^(\d{4})-(\d{2})$/);
-  if (!match) throw new Error("Periodo inválido. Usa YYYY-MM");
+  if (!match) throw new Error("Periodo inválido. Use YYYY-MM");
 
   const period_year = Number(match[1]);
   const period_month = Number(match[2]);
 
-  //-------------------------------------------------------------------
+  // ----------------------------
   // FILTROS
-  //-------------------------------------------------------------------
+  // ----------------------------
   const {
-    date,                     // ← FILTRO REAL DE FECHA YYYY-MM
-    details = true,           // ← activar/desactivar detalle
+    date,
+    details = true,
     director_id,
     regional_id,
     coordinator_id,
     district_id,
     documento,
-    distrito,
+    distrito
   } = filters;
-  // Normalizar parámetro details
-  let detailsFlag = true;
 
-  if (details === false || details === "false" || details === 0 || details === "0") {
-    detailsFlag = false;
-  }
+  let detailsFlag = !["false", "0", false, 0].includes(details);
 
-  //-------------------------------------------------------------------
-  // PARSEAR FILTRO DE FECHA REAL
-  //-------------------------------------------------------------------
+  // FILTRO REAL SIAPP
   let dateFilter = null;
-
   if (date) {
-    const fm = String(date).match(/^(\d{4})-(\d{2})$/);
-    if (fm) {
-      dateFilter = {
-        y: Number(fm[1]),
-        m: Number(fm[2])
-      };
-    }
+    const dm = String(date).match(/^(\d{4})-(\d{2})$/);
+    if (dm) dateFilter = { y: Number(dm[1]), m: Number(dm[2]) };
   }
 
-  //-------------------------------------------------------------------
-  // 1️⃣ CARGAR KPI ENCABEZADO (1 QUERY)
-  //-------------------------------------------------------------------
+  // ============================================================
+  // 1) CARGAR KPI ENCABEZADO
+  // ============================================================
+
   const baseQuery = `
     SELECT 
       kr.*,
@@ -75,40 +63,15 @@ export async function getKpiForPeriod(period, filters = {}) {
 
   const params = [period_year, period_month];
   let where = [];
-
   let idx = 3;
 
-  if (documento) {
-    where.push(`kr.documento = $${idx++}`);
-    params.push(String(documento));
-  }
+  if (documento) { where.push(`kr.documento = $${idx++}`); params.push(documento); }
+  if (distrito) { where.push(`kr.distrito_claro ILIKE $${idx++}`); params.push(`%${distrito}%`); }
+  if (district_id) { where.push(`kr.org_unit_id = $${idx++}`); params.push(district_id); }
+  if (coordinator_id) { where.push(`u.coordinator_id = $${idx++}`); params.push(coordinator_id); }
+  if (director_id) { where.push(`ou_dir.id = $${idx++}`); params.push(director_id); }
+  if (regional_id) { where.push(`ou_reg.id = $${idx++}`); params.push(regional_id); }
 
-  if (distrito) {
-    where.push(`kr.distrito_claro ILIKE $${idx++}`);
-    params.push(`%${distrito}%`);
-  }
-
-  if (district_id) {
-    where.push(`kr.org_unit_id = $${idx++}`);
-    params.push(Number(district_id));
-  }
-
-  if (coordinator_id) {
-    where.push(`u.coordinator_id = $${idx++}`);
-    params.push(Number(coordinator_id));
-  }
-
-  if (director_id) {
-    where.push(`ou_dir.id = $${idx++}`);
-    params.push(Number(director_id));
-  }
-
-  if (regional_id) {
-    where.push(`ou_reg.id = $${idx++}`);
-    params.push(Number(regional_id));
-  }
-
-  // Construir query final
   const finalQuery = `
     ${baseQuery}
     ${where.length ? " AND " + where.join(" AND ") : ""}
@@ -117,107 +80,94 @@ export async function getKpiForPeriod(period, filters = {}) {
 
   const { rows: asesores } = await pool.query(finalQuery, params);
 
-  // Si no hay asesores, retornar vacío
   if (asesores.length === 0) {
     return {
       ok: true,
-      date: date || null,
-      period: `${period_year}-${String(period_month).padStart(2, "0")}`,
       total: 0,
       resumen: { asesores: 0, total_ventas: 0 },
       data: []
     };
   }
 
-  //-------------------------------------------------------------------
-  // 2️⃣ CARGAR TODAS LAS VENTAS DE LOS ASESORES (1 SOLA QUERY)
-  //-------------------------------------------------------------------
+  // ============================================================
+  // 2) TRAER DETALLE COMPLETO DESDE kpi_resultados_detalle
+  // ============================================================
+
   const kpiIds = asesores.map(a => a.id);
 
-  const ventasQuery = `
+  const detQuery = `
     SELECT *
     FROM kpi.kpi_resultados_detalle
     WHERE kpi_id = ANY($1)
     ORDER BY kpi_id ASC, fecha ASC, id ASC
   `;
 
-  const { rows: ventas } = await pool.query(ventasQuery, [kpiIds]);
+  const { rows: detalles } = await pool.query(detQuery, [kpiIds]);
 
-  //-------------------------------------------------------------------
-  // 3️⃣ AGRUPAR VENTAS POR ASESOR
-  //-------------------------------------------------------------------
-  const ventasMap = {};
-  asesores.forEach(a => ventasMap[a.id] = []);
+  // Agrupar ventas por asesor
+  const map = {};
+  asesores.forEach(a => map[a.id] = []);
+  detalles.forEach(v => map[v.kpi_id].push(v));
 
-  for (const v of ventas) {
-    ventasMap[v.kpi_id].push(v);
-  }
+  // ============================================================
+  // 3) RECALCULAR KPI Y AGREGAR DETALLE COMPLETO
+  // ============================================================
 
-  //-------------------------------------------------------------------
-  // 4️⃣ RECALCULAR VENTAS POR ASESOR (con filtro real de fecha)
-  //-------------------------------------------------------------------
   let totalVentasGlobal = 0;
 
   for (const a of asesores) {
+    const lista = map[a.id] || [];
 
+    let ventasTotales = 0;
     let ventasDistrito = 0;
     let ventasFuera = 0;
-    let ventasTotales = 0;
 
-    const detalleFinal = [];
+    const ventasDetalle = [];
 
-    for (const v of ventasMap[a.id]) {
+    for (const v of lista) {
 
-      // FILTRO DE FECHA
+      // FILTRO FECHA SIAPP
       if (dateFilter) {
         const parsed = parseSiappDate(v.fecha);
         if (!parsed.date) continue;
-
-        const fy = parsed.date.getFullYear();
-        const fm = parsed.date.getMonth() + 1;
-
-        if (fy !== dateFilter.y || fm !== dateFilter.m) continue;
+        if (
+          parsed.date.getFullYear() !== dateFilter.y ||
+          parsed.date.getMonth() + 1 !== dateFilter.m
+        ) continue;
       }
 
       ventasTotales++;
 
-      if (v.en_distrito) ventasDistrito++;
+      // DISTRITO (compare normalized uppercase)
+      const vd = v.d_distrito?.trim().toUpperCase();
+      const da = a.distrito_claro?.trim().toUpperCase();
+
+      if (vd && da && vd === da) ventasDistrito++;
       else ventasFuera++;
 
-      if (detailsFlag) {
-        detalleFinal.push({
-          venta_num: detalleFinal.length + 1,
-          ...v
-        });
-      }
+      // Push detalle completo (todas columnas)
+      if (detailsFlag) ventasDetalle.push(v);
     }
-
-    // Asignar valores recalculados
-    a.ventas_distrito = ventasDistrito;
-    a.ventas_fuera = ventasFuera;
-    a.ventas_totales = ventasTotales;
 
     totalVentasGlobal += ventasTotales;
 
-    // Asignar detalle (o vacío si details=false)
-    a.ventas_detalle = detailsFlag ? detalleFinal : [];
+    a.ventas_totales = ventasTotales;
+    a.ventas_distrito = ventasDistrito;
+    a.ventas_fuera = ventasFuera;
+    a.ventas_detalle = detailsFlag ? ventasDetalle : [];
   }
 
-  //-------------------------------------------------------------------
-  // 5️⃣ RESUMEN FINAL
-  //-------------------------------------------------------------------
-  const resumen = {
-    asesores: asesores.length,
-    total_ventas: totalVentasGlobal
-  };
-
+  // ============================================================
+  // RESPUESTA
+  // ============================================================
   return {
     ok: true,
-    date: date || null,
-    details: detailsFlag,
     period: `${period_year}-${String(period_month).padStart(2, "0")}`,
     total: asesores.length,
-    resumen,
+    resumen: {
+      asesores: asesores.length,
+      total_ventas: totalVentasGlobal
+    },
     data: asesores
   };
 }

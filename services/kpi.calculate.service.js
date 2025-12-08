@@ -1,7 +1,7 @@
 /**************************************************************
  * KPI CALCULATE SERVICE — Versión final persistente (2025-12)
  **************************************************************/
-
+import { getDiasLaboradosManual } from "./kpi.dias-manual.service.js";
 import pool from "../config/database.js";
 import { parseSiappDate } from "../utils/parse-date-siapp.js";
 
@@ -57,15 +57,141 @@ function calcProrrateo({ presupuesto = 13, diasLaborados, totalMes }) {
  * 2. CONSULTAS BD
  **********************************************************************/
 
-async function loadSiappForPeriod({ year, month }) {
+/**
+ * Cargar ventas del SIAPP según el origen:
+ *  - simple → solo full_sales
+ *  - manual → solo generated_sales
+ *  - all    → vista unificada (por defecto)
+ */
+async function loadAllSalesForPeriod({ year, month }) {
+
   const q = `
-    SELECT *
+    WITH manual_sales AS (
+      SELECT
+        idasesor,
+        nombreasesor,
+        division,
+        area,
+        zona,
+        poblacion,
+        d_distrito,
+        fecha,
+        estado_liquidacion,
+        linea_negocio,
+        cuenta,
+        ot,
+        cantserv,
+        tipored,
+        estrato,
+        paquete_pvd,
+        mintic,
+        tipo_prodcuto,
+        ventaconvergente,
+        venta_instale_dth,
+        sac_final,
+        cedula_vendedor,
+        nombre_vendedor,
+        modalidad_venta,
+        tipo_vendedor,
+        tipo_red_comercial,
+        nombre_regional,
+        nombre_comercial,
+        nombre_lider,
+        retencion_control,
+        observ_retencion,
+        tipo_contrato,
+        tarifa_venta,
+        comision_neta,
+        punto_equilibrio,
+        venta,
+        renta,
+        tipo_registro,
+        period_year,
+        period_month,
+        'manual' AS source
+      FROM siapp.generated_sales
+      WHERE (
+        fecha IS NOT NULL
+        AND EXTRACT(YEAR FROM fecha) = $1
+        AND EXTRACT(MONTH FROM fecha) = $2
+      )
+      OR (
+        fecha IS NULL
+        AND period_year = $1
+        AND period_month = $2
+      )
+    )
+
+    SELECT
+      idasesor,
+      nombreasesor,
+      division,
+      area,
+      zona,
+      poblacion,
+      d_distrito,
+      fecha,
+      estado_liquidacion,
+      linea_negocio,
+      cuenta,
+      ot,
+      cantserv,
+      tipored,
+      estrato,
+      paquete_pvd,
+      mintic,
+      tipo_prodcuto,
+      ventaconvergente,
+      venta_instale_dth,
+      sac_final,
+      cedula_vendedor,
+      nombre_vendedor,
+      modalidad_venta,
+      tipo_vendedor,
+      tipo_red_comercial,
+      nombre_regional,
+      nombre_comercial,
+      nombre_lider,
+      retencion_control,
+      observ_retencion,
+      tipo_contrato,
+      tarifa_venta,
+      comision_neta,
+      punto_equilibrio,
+      venta,
+      renta,
+      tipo_registro,
+      period_year,
+      period_month,
+      'imported' AS source
     FROM siapp.full_sales
-    WHERE period_year = $1 AND period_month = $2
+    WHERE (
+      fecha IS NOT NULL
+      AND EXTRACT(YEAR FROM fecha) = $1
+      AND EXTRACT(MONTH FROM fecha) = $2
+    )
+    OR (
+      fecha IS NULL
+      AND period_year = $1
+      AND period_month = $2
+    )
+
+    UNION ALL
+
+    SELECT *
+    FROM manual_sales
   `;
+
   const { rows } = await pool.query(q, [year, month]);
   return rows;
 }
+
+
+
+
+
+
+
 
 async function loadUsers() {
   const q = `
@@ -87,7 +213,7 @@ async function loadUsers() {
 async function loadNovedadesForPeriod({ year, month }) {
   const q = `
     SELECT *
-    FROM staging.novedades
+    FROM kpi  .novedades
     WHERE (EXTRACT(YEAR FROM fecha_inicio) = $1 AND EXTRACT(MONTH FROM fecha_inicio) = $2)
        OR (EXTRACT(YEAR FROM fecha_fin) = $1 AND EXTRACT(MONTH FROM fecha_fin) = $2)
   `;
@@ -163,6 +289,7 @@ async function saveKpiDetail(kpiId, asesor, ventas, year, month) {
   const q = `
     INSERT INTO kpi.kpi_resultados_detalle (
       kpi_id, asesor_id, documento, period_year, period_month,
+
       idasesor, nombreasesor, division, area, zona, poblacion, d_distrito,
       fecha, estado_liquidacion, linea_negocio, cuenta, ot, cantserv, tipored,
       estrato, paquete_pvd, mintic, tipo_prodcuto, ventaconvergente,
@@ -177,10 +304,10 @@ async function saveKpiDetail(kpiId, asesor, ventas, year, month) {
       $6,$7,$8,$9,$10,$11,$12,
       $13,$14,$15,$16,$17,$18,$19,
       $20,$21,$22,$23,$24,
-      $25,$26,$27,$28,$29,$30,$31,$32,
-      $33,$34,$35,$36,$37,$38,$39,$40,
+      $25,$26,$27,$28,$29,$30,
+      $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
       $41,$42,$43
-    )
+    );
   `;
 
   for (const r of ventas) {
@@ -191,49 +318,50 @@ async function saveKpiDetail(kpiId, asesor, ventas, year, month) {
       year,
       month,
 
-      r.idasesor,
-      r.nombreasesor,
-      r.division,
-      r.area,
-      r.zona,
-      r.poblacion,
-      r.d_distrito,
-      r.fecha,
-      r.estado_liquidacion,
-      r.linea_negocio,
-      r.cuenta,
-      r.ot,
-      r.cantserv,
-      r.tipored,
-      r.estrato,
-      r.paquete_pvd,
-      r.mintic,
-      r.tipo_prodcuto,
-      r.ventaconvergente,
-      r.venta_instale_dth,
-      r.sac_final,
-      r.cedula_vendedor,
-      r.nombre_vendedor,
-      r.modalidad_venta,
-      r.tipo_vendedor,
-      r.tipo_red_comercial,
-      r.nombre_regional,
-      r.nombre_comercial,
-      r.nombre_lider,
-      r.retencion_control,
-      r.observ_retencion,
-      r.tipo_contrato,
-      r.tarifa_venta,
-      r.comision_neta,
-      r.punto_equilibrio,
-      r.venta,
-      r.renta,
-      r.tipo_registro
+      r.idasesor ?? null,
+      r.nombreasesor ?? null,
+      r.division ?? null,
+      r.area ?? null,
+      r.zona ?? null,
+      r.poblacion ?? null,
+      r.d_distrito ?? null,
+      r.fecha ?? null,
+      r.estado_liquidacion ?? null,
+      r.linea_negocio ?? null,
+      r.cuenta ?? null,
+      r.ot ?? null,
+      r.cantserv ?? null,
+      r.tipored ?? null,
+      r.estrato ?? null,
+      r.paquete_pvd ?? null,
+      r.mintic ?? null,
+      r.tipo_prodcuto ?? null,
+      r.ventaconvergente ?? null,
+      r.venta_instale_dth ?? null,
+      r.sac_final ?? null,
+      r.cedula_vendedor ?? null,
+      r.nombre_vendedor ?? null,
+      r.modalidad_venta ?? null,
+      r.tipo_vendedor ?? null,
+      r.tipo_red_comercial ?? null,
+      r.nombre_regional ?? null,
+      r.nombre_comercial ?? null,
+      r.nombre_lider ?? null,
+      r.retencion_control ?? null,
+      r.observ_retencion ?? null,
+      r.tipo_contrato ?? null,
+      r.tarifa_venta ?? null,
+      r.comision_neta ?? null,
+      r.punto_equilibrio ?? null,
+      r.venta ?? null,
+      r.renta ?? null,
+      r.tipo_registro ?? null
     ];
 
     await pool.query(q, params);
   }
 }
+
 
 /**********************************************************************
  * 4. NORMALIZACIÓN
@@ -252,11 +380,27 @@ function normalizeDistrict(raw, map) {
  * 5. EXTRAER CÉDULA SIAPP
  **********************************************************************/
 
+/**
+ * Regla oficial:
+ * - Toda venta (full_sales y generated_sales) debe ser asignada al asesor usando:
+ *   idasesor = core.users.document_id
+ */
 function extractAsesorCedula(row) {
-  const v1 = row.idasesor ? String(row.idasesor).trim() : null;
-  const v2 = row.cedula_vendedor ? String(row.cedula_vendedor).trim() : null;
-  return v1 || v2 || null;
+  if (!row) return null;
+
+  // idasesor SIEMPRE debe existir porque lo forzamos en generated_sales
+  if (row.idasesor) {
+    return String(row.idasesor).trim();
+  }
+
+  // fallback para full_sales por si existe algún archivo viejo
+  if (row.documento) {
+    return String(row.documento).trim();
+  }
+
+  return null;
 }
+
 
 /**********************************************************************
  * 6. CÁLCULO VENTAS POR ASESOR
@@ -331,8 +475,8 @@ export async function calculateKpiForPeriod(period) {
   /******************************************************
    * 2) CARGAR DATOS BASE
    ******************************************************/
-  const [siapp, usersData, novedades, districtMap] = await Promise.all([
-    loadSiappForPeriod({ year, month }),
+  const [sales, usersData, novedades, districtMap] = await Promise.all([
+    loadAllSalesForPeriod({ year, month }),
     loadUsers(),
     loadNovedadesForPeriod({ year, month }),
     loadDistrictMap()
@@ -352,14 +496,30 @@ export async function calculateKpiForPeriod(period) {
   /******************************************************
    * 3) MAPEO DE VENTAS
    ******************************************************/
+  /**
+   * Construcción de ventas por asesor (clave → document_id)
+   *
+   * El KPI solo reconoce ventas si:
+   *    row.idasesor === users.document_id
+   */
   const ventasPorAsesor = {};
 
-  for (const row of siapp) {
-    const ced = extractAsesorCedula(row);
-    if (!ced || !usersMap[ced]) continue;
-    if (!ventasPorAsesor[ced]) ventasPorAsesor[ced] = [];
-    ventasPorAsesor[ced].push(row);
+  for (const row of sales) {
+    const asesorDoc = extractAsesorCedula(row);
+
+    if (!asesorDoc) continue;
+
+    // Si el documento no existe en core.users, no debe contarse
+    const asesor = usersMap[asesorDoc];
+    if (!asesor) continue;
+
+    if (!ventasPorAsesor[asesorDoc]) {
+      ventasPorAsesor[asesorDoc] = [];
+    }
+
+    ventasPorAsesor[asesorDoc].push(row);
   }
+
 
   /******************************************************
    * 4) PROCESAR CADA ASESOR
@@ -371,11 +531,24 @@ export async function calculateKpiForPeriod(period) {
     const cedula = String(u.document_id || "").trim();
     const ventas = ventasPorAsesor[cedula] || [];
 
-    const diasLaborados = calcDiasLaborados({
+    let diasLaborados = calcDiasLaborados({
       year,
       month,
       novedades: novedadesPorCedula[cedula] || []
     });
+
+    // 2. Revisar si existe override manual en BD
+    const manual = await getDiasLaboradosManual({
+      user_id: u.id,   // o asesor.id según tu variable real
+      year,
+      month
+    });
+
+    // 3. Si existe manual, reemplazar
+    if (manual) {
+      diasLaborados = manual.dias;
+    }
+
 
     const prorrateo = calcProrrateo({
       presupuesto: 13,
@@ -409,7 +582,7 @@ export async function calculateKpiForPeriod(period) {
     ok: true,
     periodo: { year, month },
     total_asesores: kpiRows.length,
-    total_ventas_reales: siapp.length,
+    total_ventas_reales: sales.length,
     total_kpi_persistidos: kpiRows.length,
     kpis: kpiRows
   };

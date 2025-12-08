@@ -4,7 +4,7 @@ export const VALID_ROLES = ['ADMIN','GERENCIA','DIRECCION','COORDINACION','ASESO
 export const isValidRole = (r) => VALID_ROLES.includes(String(r || '').toUpperCase())
 
 /* ============================================================
-   🔍 BUSCAR USUARIO POR CÉDULA
+   BUSCAR USUARIO POR CÉDULA
    ============================================================ */
 export async function findUserByDocument(client, document_id) {
   const { rows } = await client.query(
@@ -15,7 +15,7 @@ export async function findUserByDocument(client, document_id) {
 }
 
 /* ============================================================
-   🔧 UPSERT: CREA O ACTUALIZA USUARIO DESDE PRESUPUESTO/NOMINA
+    UPSERT: CREA O ACTUALIZA USUARIO DESDE PRESUPUESTO/NOMINA
    ============================================================ */
 export async function upsertUser(client, data) {
   const {
@@ -153,7 +153,7 @@ export async function upsertUser(client, data) {
 }
 
 /* ============================================================
-   📌 LISTA DE USUARIOS
+   LISTA DE USUARIOS
    ============================================================ */
 export async function listUsers({ orgUnitIds = null } = {}) {
   const baseQuery = `
@@ -198,7 +198,7 @@ export async function listUsers({ orgUnitIds = null } = {}) {
 }
 
 /* ============================================================
-   📌 OBTENER UN USUARIO POR ID
+    OBTENER UN USUARIO POR ID
    ============================================================ */
 export async function getUserById(id) {
   const { rows } = await pool.query(
@@ -237,7 +237,7 @@ export async function getUserById(id) {
 }
 
 /* ============================================================
-   📌 VALIDACIONES
+    VALIDACIONES
    ============================================================ */
 export async function orgUnitExists(org_unit_id) {
   const { rows } = await pool.query(
@@ -263,7 +263,7 @@ export async function emailInUse(email, ignoreId = null) {
   return rows.length > 0
 }
 /* ============================================================
-   📌 CREATE USER
+    CREATE USER
    ============================================================ */
 export async function createUser({
   org_unit_id,
@@ -332,7 +332,7 @@ export async function createUser({
 }
 
 /* ============================================================
-   📌 UPDATE USER
+    UPDATE USER
    ============================================================ */
 export async function updateUser(
   id,
@@ -405,8 +405,8 @@ export async function updateUser(
 }
 
 
-/* ============================================================
-   📌 DELETE USER
+/* ===========================================================
+    DELETE USER
    ============================================================ */
 export async function deleteUser(id) {
   await pool.query(`DELETE FROM core.users WHERE id = $1`, [id])

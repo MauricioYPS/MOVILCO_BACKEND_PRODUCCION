@@ -1,6 +1,5 @@
 import pool from '../config/database.js'
 
-// Normalizador simple de strings (quitar tildes y espacios raros)
 function norm(str) {
   return String(str ?? '')
     .trim()
@@ -8,7 +7,6 @@ function norm(str) {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
 }
 
-// Convierte un valor tipo 'SI', 'Sí', 'yes', 1 -> true
 function toBool(v) {
   const s = norm(v)
   return ['si','s','yes','true','1'].includes(s)

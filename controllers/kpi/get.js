@@ -20,7 +20,7 @@ export async function getKpiController(req, res) {
     return res.json({ ok: true, ...result });
 
   } catch (e) {
-    console.error("\n [KPI GET Controller] Error detectado:");
+    console.error("\n[KPI GET Controller] Error detectado:");
     console.error(e);
     console.error("========================================\n");
 

@@ -74,9 +74,8 @@ export async function exportNominaExcel({ period }) {
       row.presupuesto_mes,
       row.dias_laborados_31,
       row.prorrateo_novedades,
-      row.dias_laborados_31, // recreo usa lo mismo
-      row.prorrateo_novedades, // garantizado para comisionar
-      row.prorrateo_novedades, // garantizado con novedades
+      row.dias_laborados_31,
+      row.prorrateo_novedades, 
       row.ventas_distrito,
       row.ventas_fuera_distrito,
       row.total_ventas,

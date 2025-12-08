@@ -91,6 +91,7 @@ function buildColumnIndex(ws, headerRow) {
     regional: ["REGIONAL"],
     fecha_inicio: ["FECHA INICIO"],
     fecha_fin: ["FECHA FIN"],
+    contrato: ["CONTRATADO"],   // ← AGREGADO
     presupuesto: ["PRESUPUESTO"],
     ejecutado: ["EJECUTADO"],
     cierre: ["CIERRE"],
@@ -98,6 +99,7 @@ function buildColumnIndex(ws, headerRow) {
     telefono: ["TELEFONO", "TEL"],
     correo: ["CORREO", "EMAIL"]
   };
+
 
   return {
     jerarquia: findAny(wanted.jerarquia),
@@ -108,6 +110,7 @@ function buildColumnIndex(ws, headerRow) {
     regional: findAny(wanted.regional),
     fecha_inicio: findAny(wanted.fecha_inicio),
     fecha_fin: findAny(wanted.fecha_fin),
+    contratado: findAny(wanted.contrato),   // ← AGREGADO
     presupuesto: findAny(wanted.presupuesto),
     ejecutado: findAny(wanted.ejecutado),
     cierre: findAny(wanted.cierre),
@@ -148,6 +151,7 @@ export async function importPresupuestoJerarquia(buffer) {
       cargo_raw: idx.cargo > 0 ? normalize(row.getCell(idx.cargo).value) : null,
       cedula: idx.cedula > 0 ? normalize(row.getCell(idx.cedula).value).replace(/\D/g, "") : null,
       nombre_raw: idx.nombre > 0 ? normalize(row.getCell(idx.nombre).value) : null,
+      contratado_raw: idx.contratado > 0 ? normalize(row.getCell(idx.contratado).value) : null,
       distrito_raw: idx.distrito > 0 ? normalize(row.getCell(idx.distrito).value) : null,
       regional_raw: idx.regional > 0 ? normalize(row.getCell(idx.regional).value) : null,
       fecha_inicio: idx.fecha_inicio > 0 ? toDate(row.getCell(idx.fecha_inicio).value) : null,
@@ -158,6 +162,7 @@ export async function importPresupuestoJerarquia(buffer) {
       capacidad_raw: idx.capacidad > 0 ? toNumber(row.getCell(idx.capacidad).value) : null,
       telefono_raw: idx.telefono > 0 ? normalize(row.getCell(idx.telefono).value) : null,
       correo_raw: idx.correo > 0 ? normalize(row.getCell(idx.correo).value) : null,
+
     };
 
     if (rowHasAnyValue(rec)) rows.push(rec);
@@ -172,30 +177,31 @@ export async function importPresupuestoJerarquia(buffer) {
     await client.query("TRUNCATE TABLE core.presupuesto_jerarquia RESTART IDENTITY");
 
     const insertCols = `
-      jerarquia_raw, cargo_raw, cedula, nombre_raw, distrito_raw, regional_raw,
-      fecha_inicio, fecha_fin, presupuesto_raw, ejecutado_raw, cierre_raw,
-      capacidad_raw, telefono_raw, correo_raw
-    `;
+  jerarquia_raw, cargo_raw, cedula, nombre_raw, contratado_raw, distrito_raw, regional_raw,
+  fecha_inicio, fecha_fin, presupuesto_raw, ejecutado_raw, cierre_raw,
+  capacidad_raw, telefono_raw, correo_raw
+`;
 
     const insertSQL = `
-      INSERT INTO core.presupuesto_jerarquia
-      (${insertCols})
-      VALUES
-      ${rows.map((_, i) => {
-        const b = i * 14;
-        return `(
-          $${b+1}, $${b+2}, $${b+3}, $${b+4}, $${b+5}, $${b+6},
-          $${b+7}, $${b+8}, $${b+9}, $${b+10}, $${b+11},
-          $${b+12}, $${b+13}, $${b+14}
-        )`;
-      }).join(", ")}
-    `;
+  INSERT INTO core.presupuesto_jerarquia
+  (${insertCols})
+  VALUES
+  ${rows.map((_, i) => {
+      const b = i * 15;
+      return `(
+      $${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5},
+      $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10},
+      $${b + 11}, $${b + 12}, $${b + 13}, $${b + 14}, $${b + 15}
+    )`;
+    }).join(", ")}
+`;
 
     const values = rows.flatMap(r => [
       r.jerarquia_raw,
       r.cargo_raw,
       r.cedula,
       r.nombre_raw,
+      r.contratado_raw,
       r.distrito_raw,
       r.regional_raw,
       r.fecha_inicio,
@@ -205,8 +211,9 @@ export async function importPresupuestoJerarquia(buffer) {
       r.cierre_raw,
       r.capacidad_raw,
       r.telefono_raw,
-      r.correo_raw
+      r.correo_raw,
     ]);
+
 
     if (rows.length > 0) await client.query(insertSQL, values);
 

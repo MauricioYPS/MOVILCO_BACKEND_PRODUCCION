@@ -8,7 +8,12 @@ import kpiRouter from './kpi.js'
 import settingsRouter from './settings.js'
 import reportsRouter from './reports.js'
 import analyticsRouter from './analytics.js'
-
+import advisorRouter from './advisor.js'
+import coordinatorRouter from './coordinator.js'
+import generateSalesRouter from './generateSales.js'
+import workflowRouter from './workflow.js'
+import exportRouter from './export.js'
+import mailRouter from './mail.js'
 
 const router = Router()
 
@@ -21,4 +26,11 @@ router.use('/staging', stagingRouter)
 router.use('/kpi', kpiRouter)
 router.use('/settings', settingsRouter)
 router.use('/reports', reportsRouter)
+router.use('/advisor', advisorRouter)
+router.use('/coordinator', coordinatorRouter)
+router.use('/generate-sales', generateSalesRouter)
+router.use('/workflow', workflowRouter)
+router.use('/export', exportRouter)
+router.use('/mail', mailRouter)
+
 export default router
