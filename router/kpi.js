@@ -8,7 +8,7 @@ import { getUnknownAdvisorsController } from "../controllers/kpi/unknown.js";
 import {postDiasManualController,getDiasManualController,deleteDiasManualController
 } from "../controllers/kpi/dias-manual.js";
 import {postNovedadController,getNovedadesController,deleteNovedadController} from "../controllers/kpi/novedades.js";
-
+// import { getKpiResume} from '../controllers/kpi/kpi.controller.js';
 
 const router = Router()
 
@@ -18,11 +18,13 @@ router.get('/calculate', kpiCalculateController);
 router.post('/save', saveKpiController);
 router.get('/get', getKpiController);
 router.get('/unknown', getUnknownAdvisorsController);
+// router.get('/resume', getKpiResume);
 router.post("/manualdays", postDiasManualController);
 router.get("/manualdays", getDiasManualController);
 router.post("/novedades", postNovedadController);
 router.get("/novedades", getNovedadesController);
 router.delete("/novedades/:id", deleteNovedadController);
+
 
 router.delete("/manualdays/:id", deleteDiasManualController);
 export default router

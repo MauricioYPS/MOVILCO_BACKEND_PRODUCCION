@@ -1,3 +1,4 @@
+import { authRequired} from "../middlewares/authRequired.js"
 import { Router } from "express";
 import unitsRouter from './units.js'
 import usersRouter from './user.js'
@@ -14,23 +15,26 @@ import generateSalesRouter from './generateSales.js'
 import workflowRouter from './workflow.js'
 import exportRouter from './export.js'
 import mailRouter from './mail.js'
-
+import authRouter from './auth.router.js'
+import regionalRouer from './regional.js'
 const router = Router()
 
+router.use('/auth',authRouter)
 router.use('/org',unitsRouter)
-router.use('/analytics', analyticsRouter)
-router.use('/users', usersRouter)
-router.use('/imports', importsRouter)
-router.use('/promote', promoteRouter)
-router.use('/staging', stagingRouter)
-router.use('/kpi', kpiRouter)
-router.use('/settings', settingsRouter)
-router.use('/reports', reportsRouter)
-router.use('/advisor', advisorRouter)
-router.use('/coordinator', coordinatorRouter)
-router.use('/generate-sales', generateSalesRouter)
-router.use('/workflow', workflowRouter)
-router.use('/export', exportRouter)
-router.use('/mail', mailRouter)
+router.use('/analytics',analyticsRouter)
+router.use('/users',usersRouter)
+router.use('/imports',importsRouter)
+router.use('/promote',promoteRouter)
+router.use('/staging',stagingRouter)
+router.use('/kpi' ,kpiRouter)
+router.use('/settings' ,settingsRouter)
+router.use('/reports' ,reportsRouter)
+router.use('/advisor' ,advisorRouter)
+router.use('/coordinator' ,coordinatorRouter)
+router.use('/generate-sales',generateSalesRouter)
+router.use('/workflow' ,workflowRouter)
+router.use('/export' ,exportRouter)
+router.use('/mail' ,mailRouter)
+router.use('/regional' ,regionalRouer)
 
 export default router

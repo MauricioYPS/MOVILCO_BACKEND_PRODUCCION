@@ -42,10 +42,8 @@ export async function upsertUser(client, data) {
     cierre_porcentaje
   } = data
 
-  const password_hash = 'pending-hash'
-
   if (!id) {
-    // CREATE
+    // CREATE sin password_hash (¡NO tocar contraseñas!)
     const { rows } = await client.query(
       `INSERT INTO core.users (
         org_unit_id,
@@ -67,10 +65,9 @@ export async function upsertUser(client, data) {
         jerarquia,
         presupuesto,
         ejecutado,
-        cierre_porcentaje,
-        password_hash
+        cierre_porcentaje
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
       RETURNING *`,
       [
         org_unit_id,
@@ -92,13 +89,12 @@ export async function upsertUser(client, data) {
         jerarquia,
         presupuesto,
         ejecutado,
-        cierre_porcentaje,
-        password_hash
+        cierre_porcentaje
       ]
     )
     return rows[0]
   } else {
-    // UPDATE
+    // UPDATE (NO se toca password_hash)
     const { rows } = await client.query(
       `UPDATE core.users
        SET org_unit_id=$1,
@@ -262,8 +258,9 @@ export async function emailInUse(email, ignoreId = null) {
   )
   return rows.length > 0
 }
+
 /* ============================================================
-    CREATE USER
+    CREATE USER (para auth, no importadores)
    ============================================================ */
 export async function createUser({
   org_unit_id,
@@ -274,7 +271,7 @@ export async function createUser({
   email,
   phone,
   role,
-  password_hash = 'pending-hash'
+  password_hash // aquí sí permitimos contraseña explícita
 }) {
   const { rows } = await pool.query(
     `
@@ -332,7 +329,7 @@ export async function createUser({
 }
 
 /* ============================================================
-    UPDATE USER
+    UPDATE USER (no modifica contraseñas)
    ============================================================ */
 export async function updateUser(
   id,
@@ -404,8 +401,7 @@ export async function updateUser(
   return rows[0]
 }
 
-
-/* ===========================================================
+/* ============================================================
     DELETE USER
    ============================================================ */
 export async function deleteUser(id) {

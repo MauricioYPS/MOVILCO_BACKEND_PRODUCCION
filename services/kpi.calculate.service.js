@@ -23,7 +23,7 @@ function daysInMonth(year, month) {
   return new Date(year, month, 0).getDate();
 }
 
-function calcDiasLaborados({ year, month, novedades }) {
+export function calcDiasLaborados({ year, month, novedades }) {
   const total = daysInMonth(year, month);
   if (!novedades?.length) return total;
 
@@ -48,7 +48,7 @@ function calcDiasLaborados({ year, month, novedades }) {
   return Math.max(0, total - noLaborados);
 }
 
-function calcProrrateo({ presupuesto = 13, diasLaborados, totalMes }) {
+export function calcProrrateo({ presupuesto = 13, diasLaborados, totalMes }) {
   if (totalMes === 0) return 0;
   return Number(((presupuesto / totalMes) * diasLaborados).toFixed(2));
 }
@@ -63,7 +63,7 @@ function calcProrrateo({ presupuesto = 13, diasLaborados, totalMes }) {
  *  - manual → solo generated_sales
  *  - all    → vista unificada (por defecto)
  */
-async function loadAllSalesForPeriod({ year, month }) {
+export async function loadAllSalesForPeriod({ year, month }) {
 
   const q = `
     WITH manual_sales AS (
@@ -210,7 +210,7 @@ async function loadUsers() {
   return { list: rows, map };
 }
 
-async function loadNovedadesForPeriod({ year, month }) {
+export async function loadNovedadesForPeriod({ year, month }) {
   const q = `
     SELECT *
     FROM kpi  .novedades
@@ -221,7 +221,7 @@ async function loadNovedadesForPeriod({ year, month }) {
   return rows;
 }
 
-async function loadDistrictMap() {
+export async function loadDistrictMap() {
   const q = `
     SELECT raw_name, normalized_name, official_district_name, is_official
     FROM siapp.district_map
@@ -367,7 +367,7 @@ async function saveKpiDetail(kpiId, asesor, ventas, year, month) {
  * 4. NORMALIZACIÓN
  **********************************************************************/
 
-function normalizeDistrict(raw, map) {
+export function normalizeDistrict(raw, map) {
   if (!raw) return null;
   const key = String(raw).trim().toUpperCase();
   const entry = map[key];
@@ -385,7 +385,7 @@ function normalizeDistrict(raw, map) {
  * - Toda venta (full_sales y generated_sales) debe ser asignada al asesor usando:
  *   idasesor = core.users.document_id
  */
-function extractAsesorCedula(row) {
+export function extractAsesorCedula(row) {
   if (!row) return null;
 
   // idasesor SIEMPRE debe existir porque lo forzamos en generated_sales
@@ -406,7 +406,7 @@ function extractAsesorCedula(row) {
  * 6. CÁLCULO VENTAS POR ASESOR
  **********************************************************************/
 
-function computeSalesForAsesor({ rows, asesor, districtMap }) {
+export function computeSalesForAsesor({ rows, asesor, districtMap }) {
   let ventasDistrito = 0;
   let ventasFuera = 0;
 
