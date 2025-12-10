@@ -15,7 +15,7 @@ export function rateLimitLogin(req, res, next) {
   record.lastTry = now;
   loginAttempts.set(ip, record);
 
-  if (record.attempts > 10) {
+  if (record.attempts > 20) {
     return res.status(429).json({
       ok: false,
       error: "Demasiados intentos, espere 5 minutos"

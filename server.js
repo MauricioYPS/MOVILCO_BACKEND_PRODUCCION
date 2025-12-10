@@ -14,7 +14,7 @@ server.use(express.json())
 server.use(express.urlencoded({extended:true}))
 server.use(
   cors({
-    origin: "http://localhost:5173", // tu frontend
+    origin: "https://movilco.devmauricioy.com", // tu frontend
     credentials: true, // permite cookies
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],

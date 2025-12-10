@@ -153,45 +153,88 @@ export async function upsertUser(client, data) {
    ============================================================ */
 export async function listUsers({ orgUnitIds = null } = {}) {
   const baseQuery = `
-    SELECT
-      id,
-      org_unit_id,
-      document_id,
-      advisor_id,
-      coordinator_id,
-      name,
-      email,
-      phone,
-      role,
-      active,
-      district,
-      district_claro,
-      regional,
-      cargo,
-      capacity,
-      jerarquia,
-      presupuesto,
-      ejecutado,
-      cierre_porcentaje,
-      contract_start,
-      contract_end,
-      notes,
-      created_at,
-      updated_at
-    FROM core.users
-  `
+    WITH org AS (
+      SELECT 
+        u.id AS user_id,
+        u.org_unit_id,
+        u.document_id,
+        u.advisor_id,
+        u.coordinator_id,
+        u.name,
+        u.email,
+        u.phone,
+        u.role,
+        u.active,
+        u.district,
+        u.district_claro,
+        u.regional,
+        u.cargo,
+        u.capacity,
+        u.jerarquia,
+        u.presupuesto,
+        u.ejecutado,
+        u.cierre_porcentaje,
+        u.contract_start,
+        u.contract_end,
+        u.notes,
+        u.created_at,
+        u.updated_at,
+
+        ou.id AS unit_id,
+        ou.parent_id AS unit_parent_id,
+        ou.unit_type AS unit_type,
+
+        d.id AS direccion_unit_id,
+        d.parent_id AS direccion_parent_id,
+        d.unit_type AS direccion_type,
+
+        g.id AS gerencia_unit_id,
+        g.unit_type AS gerencia_type
+      FROM core.users u
+      LEFT JOIN core.org_units ou ON ou.id = u.org_unit_id
+      LEFT JOIN core.org_units d  ON d.id = ou.parent_id
+      LEFT JOIN core.org_units g  ON g.id = d.parent_id
+    ),
+
+    resolved_parent AS (
+      SELECT 
+        o.*,
+
+        -- Normalización del padre
+        CASE 
+          WHEN o.jerarquia = 'ASESORIA' THEN (
+            SELECT id FROM core.users cu 
+            WHERE cu.org_unit_id = o.unit_parent_id LIMIT 1
+          )
+          WHEN o.jerarquia = 'COORDINACION' THEN (
+            SELECT id FROM core.users du
+            WHERE du.org_unit_id = o.direccion_unit_id LIMIT 1
+          )
+          WHEN o.jerarquia = 'DIRECCION' THEN (
+            SELECT id FROM core.users gu
+            WHERE gu.org_unit_id = o.gerencia_unit_id LIMIT 1
+          )
+          ELSE NULL
+        END AS parent_id_normalized
+      FROM org o
+    )
+
+    SELECT * FROM resolved_parent
+  `;
 
   if (Array.isArray(orgUnitIds) && orgUnitIds.length > 0) {
     const { rows } = await pool.query(
-      `${baseQuery} WHERE org_unit_id = ANY($1::bigint[]) ORDER BY id ASC`,
+      `${baseQuery} WHERE org_unit_id = ANY($1::bigint[]) ORDER BY user_id ASC`,
       [orgUnitIds]
-    )
-    return rows
+    );
+    return rows;
   }
 
-  const { rows } = await pool.query(`${baseQuery} ORDER BY id ASC`)
-  return rows
+  const { rows } = await pool.query(`${baseQuery} ORDER BY user_id ASC`);
+  return rows;
 }
+
+
 
 /* ============================================================
     OBTENER UN USUARIO POR ID
@@ -227,6 +270,7 @@ export async function getUserById(id) {
     FROM core.users
     WHERE id = $1
     `,
+ 
     [id]
   )
   return rows[0] || null

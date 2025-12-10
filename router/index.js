@@ -17,6 +17,8 @@ import exportRouter from './export.js'
 import mailRouter from './mail.js'
 import authRouter from './auth.router.js'
 import regionalRouer from './regional.js'
+import emailRouter from './email.js'
+
 const router = Router()
 
 router.use('/auth',authRouter)
@@ -36,5 +38,6 @@ router.use('/workflow' ,workflowRouter)
 router.use('/export' ,exportRouter)
 router.use('/mail' ,mailRouter)
 router.use('/regional' ,regionalRouer)
+router.use('/email' ,emailRouter)
 
 export default router

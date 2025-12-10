@@ -10,6 +10,7 @@ import { validateCoordinatorAccess } from '../middlewares/validateCoordinatorAcc
 import { validateDirectionAccess } from '../middlewares/validateDirectionAccess.js'
 import { validateGerenciaAccess } from '../middlewares/validateGerenciaAccess.js'
 import { getUserFullProfile } from '../controllers/users/user.profile.controller.js'
+import { getUsersByDirector, getCoordinadoresByDirector } from '../controllers/users/read.js'
 const router = Router()
 
 router.get('/', list)
@@ -18,7 +19,8 @@ router.get('/by-direction/:id', getCoordinadoresByDireccion)
 router.get('/by-management/:gerencia_id', getDireccionesByGerencia)
 router.get('/by-direction-v2/:direction_id' ,getCoordinadoresByDireccionV2)
 router.get('/profile/:id',getUserFullProfile)
-
+router.get('/by-director/:id',getUsersByDirector)
+router.get('/director/:id/coordinadores',getCoordinadoresByDirector)
 router.post('/', create)
 router.put('/:id', update)
 router.delete('/:id', remove)
