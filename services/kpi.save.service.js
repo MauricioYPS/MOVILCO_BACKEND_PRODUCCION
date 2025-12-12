@@ -1,5 +1,3 @@
-
-
 import pool from "../config/database.js";
 import { calculateKpiForPeriod } from "./kpi.calculate.service.js";
 
@@ -10,12 +8,12 @@ import { calculateKpiForPeriod } from "./kpi.calculate.service.js";
  *  - Recalcula KPI siempre
  *  - Borra registros del mismo periodo
  *  - Inserta KPI limpio y actualizado
- *  - raw_json ahora contiene información completa del asesor
+ *  - raw_json contiene estructura completa del asesor
  */
 export async function saveKpiForPeriod(period) {
   console.log(`\n[KPI SAVE] Iniciando guardado para periodo ${period}`);
 
-  // 1) Calcular KPI del periodo
+  // 1) Calcular KPI del periodo (ya incluye usuarios, ventas y presupuesto)
   const calc = await calculateKpiForPeriod(period);
   const { year, month } = calc.periodo;
   const kpis = calc.kpis;
@@ -36,9 +34,7 @@ export async function saveKpiForPeriod(period) {
       [year, month]
     );
 
-    console.log(
-      `[KPI SAVE] Eliminados ${del.rowCount} registros previos.`
-    );
+    console.log(`[KPI SAVE] Eliminados ${del.rowCount} registros previos.`);
 
     /************************************************************
      * 2. INSERTAR KPI NUEVO (estructura final)
@@ -67,7 +63,6 @@ export async function saveKpiForPeriod(period) {
     let insertados = 0;
 
     for (const k of kpis) {
-      // Construimos raw_json ampliado
       const raw = {
         ...k,
         periodo: { year, month }
@@ -83,7 +78,7 @@ export async function saveKpiForPeriod(period) {
         k.estado,
 
         k.org_unit_id ?? null,
-        k.distrito_claro ?? null, // FIX: antes usaba k.distrito (incorrecto)
+        k.distrito_claro ?? null,
 
         k.dias_laborados,
         k.presupuesto_prorrateado,
@@ -95,7 +90,7 @@ export async function saveKpiForPeriod(period) {
         k.cumple_distrito,
         k.cumple_global,
 
-        raw // raw_json extendido
+        raw
       ]);
 
       insertados++;
@@ -104,7 +99,7 @@ export async function saveKpiForPeriod(period) {
     await client.query("COMMIT");
 
     console.log(
-      `[KPI SAVE]  Guardado exitoso: ${insertados} registros insertados`
+      `[KPI SAVE] Guardado exitoso: ${insertados} registros insertados`
     );
 
     return {
@@ -112,17 +107,14 @@ export async function saveKpiForPeriod(period) {
       message: "KPI guardado correctamente",
       period,
       saved: insertados,
-
-      // Estadísticas últiles
-      total_ventas_reales: calc.total_ventas_reales,
-      total_ventas_registradas: calc.total_ventas_registradas,
-      total_ventas_desconocidas: calc.total_ventas_desconocidas
+      total_ventas_reales: calc.total_ventas_reales
     };
 
   } catch (e) {
     await client.query("ROLLBACK");
     console.error("\n[ KPI SAVE ERROR]", e);
     throw e;
+
   } finally {
     client.release();
   }

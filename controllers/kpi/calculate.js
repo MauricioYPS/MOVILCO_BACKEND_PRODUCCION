@@ -1,19 +1,11 @@
-// ======================================================================
-// KPI CALCULATE CONTROLLER — Versión final corregida 2025-12
-// ======================================================================
-
 import { calculateKpiForPeriod } from "../../services/kpi.calculate.service.js";
 
 export async function kpiCalculateController(req, res) {
   try {
     const period = req.query.period || req.query.periodo;
 
-    if (!period) {
-      return res.status(400).json({
-        ok: false,
-        message: "Debes enviar ?period=YYYY-MM"
-      });
-    }
+    if (!period)
+      return res.status(400).json({ ok: false, message: "Debes enviar ?period=YYYY-MM" });
 
     console.log("📊 Ejecutando cálculo KPI para periodo:", period);
 
@@ -26,7 +18,7 @@ export async function kpiCalculateController(req, res) {
     });
 
   } catch (error) {
-    console.error("❌ Error en kpiCalculateController:", error);
+    console.error("❌ Error en KPI:", error);
 
     return res.status(500).json({
       ok: false,

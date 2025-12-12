@@ -9,6 +9,10 @@ import {postDiasManualController,getDiasManualController,deleteDiasManualControl
 } from "../controllers/kpi/dias-manual.js";
 import {postNovedadController,getNovedadesController,deleteNovedadController} from "../controllers/kpi/novedades.js";
 // import { getKpiResume} from '../controllers/kpi/kpi.controller.js';
+import { weeklyKpiGetController } from "../controllers/kpi/weekly.get.js";
+import { weeklyKpiCalculateController } from "../controllers/kpi/weekly.calculate.js";
+import { weeklyKpiSaveController } from "../controllers/kpi/weekly.save.js";
+
 
 const router = Router()
 
@@ -24,6 +28,13 @@ router.get("/manualdays", getDiasManualController);
 router.post("/novedades", postNovedadController);
 router.get("/novedades", getNovedadesController);
 router.delete("/novedades/:id", deleteNovedadController);
+
+
+
+router.get("/weekly", weeklyKpiGetController);
+router.post("/weekly/calculate", weeklyKpiCalculateController);
+router.post("/weekly/save", weeklyKpiSaveController);
+
 
 
 router.delete("/manualdays/:id", deleteDiasManualController);

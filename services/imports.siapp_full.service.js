@@ -87,7 +87,6 @@ const allowed = {
   poblacion: "poblacion",
 
   d_distrito: "d_distrito",
-
   renta: "renta",
   fecha: "fecha",
   venta: "venta",
@@ -97,16 +96,17 @@ const allowed = {
   paquete_pvd: "paquete_pvd",
   mintic: "mintic",
 
-  tipoprodcuto: "tipo_prodcuto",
+  // AQUÍ LOS QUE ESTABAN MAL
+  tipo_prodcuto: "tipo_prodcuto",              // OK ahora coincide
   ventaconvergente: "ventaconvergente",
+  venta_instale_dth: "Venta_Instale_DTH",       // OK ahora coincide exacto
+  tipo_red_comercial: "tipo_red_comercial",    // OK ahora coincide exacto
 
-  ventainstaledth: "venta_instale_dth",
   sac_final: "sac_final",
   cedula_vendedor: "cedula_vendedor",
   nombre_vendedor: "nombre_vendedor",
   modalidad_venta: "modalidad_venta",
   tipo_vendedor: "tipo_vendedor",
-  tiporedcomercial: "tipo_red_comercial",
 
   nombre_regional: "nombre_regional",
   nombre_comercial: "nombre_comercial",
@@ -114,6 +114,7 @@ const allowed = {
   retencion_control: "retencion_control",
   observ_retencion: "observ_retencion",
   tipo_contrato: "tipo_contrato",
+
   tarifa_venta: "tarifa_venta",
   comision_neta: "comision_neta",
   punto_equilibrio: "punto_equilibrio"

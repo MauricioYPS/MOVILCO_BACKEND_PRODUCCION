@@ -1,10 +1,10 @@
 // ======================================================================
-//  PROMOTE — PRESUPUESTO JERARQUÍA (VERSIÓN CORREGIDA 2025-12-06)
+//  PROMOTE — PRESUPUESTO JERARQUÍA (VERSIÓN FINAL 2025-12-10)
 // ======================================================================
 import pool from "../config/database.js";
 
 // ----------------------------------------------------------
-// UTILIDADES BÁSICAS
+// UTILIDADES
 // ----------------------------------------------------------
 function norm(s) {
   if (!s) return "";
@@ -16,28 +16,38 @@ function norm(s) {
 }
 
 // ======================================================================
-// 1) DISTRITOS CANONIZADOS Y ALIAS
+//  DISTRITOS CANONIZADOS + ALIAS  (NO MODIFICADOS)
 // ======================================================================
-
-// --- (Se mantiene exactamente tu tabla DISTRICT_STD) ---
 const DISTRICT_STD = {
   "GERENCIA COMERCIAL": "GERENCIA COMERCIAL",
   "DIRECTOR OPERATIVO FIJO NACIONAL": "DIRECTOR OPERATIVO FIJO NACIONAL",
+
+
+
 
   "DIRECTOR META": "META",
   "DIRECTOR SANTANDER": "SANTANDER",
   "DIRECTOR NORTE SANTANDER, TOLIMA Y HUILA": "NORTE SANTANDER",
   "TOLIMA Y HUILA": "TOLIMA-HUILA",
 
+
+
+
   "DIRECTOR MEDELLIN OCCIDENTAL": "MEDELLIN OCCIDENTAL",
   "DIRECTOR MEDELLIN NOROCCIDENTAL": "MEDELLIN NOROCCIDENTE",
   "DIRECTOR CALI Y CAUCA": "CALI-CAUCA",
+
+
+
 
   "BELLO METROPOLITANO": "BELLO METROPOLITANO",
   "BELLO NORTE": "BELLO NORTE",
   "MEDELLIN OCCIDENTAL 4": "MEDELLIN OCCIDENTAL 4",
   "MEDELLIN NOROCCIDENTE 1": "MEDELLIN NOROCCIDENTE 1",
   "MEDELLIN NOROCCIDENTE 2": "MEDELLIN NOROCCIDENTE 2",
+
+
+
 
   "CAUCA DISTRITO 1": "CAUCA 1",
   "ALFONSO LOPEZ": "ALFONSO LOPEZ",
@@ -47,12 +57,24 @@ const DISTRICT_STD = {
   "EL JARDIN": "EL JARDIN",
   "YUMBO": "YUMBO",
 
+
+
+
   "HUILA DISTRITO 6": "HUILA 6",
   "PITALITO DISTRITO 1": "PITALITO",
+
+
+
 
   "TOLIMA DISTRITO 2.1": "TOLIMA 2.1",
   "TOLIMA DISTRITO 2.2": "TOLIMA 2.2",
   "TOLIMA DISTRITO 3": "TOLIMA 3",
+
+
+
+
+
+
 
 
   "CUCUTA 1": "CUCUTA 1",
@@ -60,16 +82,25 @@ const DISTRICT_STD = {
   "LOS PATIOS": "LOS PATIOS",
   "VILLA DEL ROSARIO": "VILLA DEL ROSARIO",
 
+
+
+
   "LLANOS 1.1": "LLANOS 1.1",
   "LLANOS 1.2": "LLANOS 1.2",
   "VILLAVICENCIO 1": "VILLAVICENCIO 1",
   "VILLAVICENCIO 2": "VILLAVICENCIO 2",
   "VILLAVICENCIO 3": "VILLAVICENCIO 3",
 
+
+
+
   "BUCARAMANGA 1": "BUCARAMANGA 1",
   "BUCARAMANGA 2": "BUCARAMANGA 2",
   "FLORIDABLANCA 1": "FLORIDABLANCA 1",
 };
+
+
+
 
 // --------------------------
 // Aliases → distritos canonizados
@@ -78,34 +109,58 @@ const DISTRICT_ALIAS = {
   "ZONA LLANOS 1.1": "LLANOS 1.1",
   "ZONA LLANOS 1.2": "LLANOS 1.2",
 
+
+
+
   "ZONA V/CIO 1": "VILLAVICENCIO 1",
   "ZONA V/CIO 2": "VILLAVICENCIO 2",
   "ZONA V/CIO 3": "VILLAVICENCIO 3",
+
+
+
 
   "ZONA VILLAVICENCIO 1": "VILLAVICENCIO 1",
   "ZONA VILLAVICENCIO 2": "VILLAVICENCIO 2",
   "ZONA VILLAVICENCIO 3": "VILLAVICENCIO 3",
 
+
+
+
   "ZONA CAUCA 1": "CAUCA 1",
   "ZONA CAUCA 4": "CAUCA 1",
+
+
+
 
   "ZONA CHIPICHAPE": "CHIPICHAPE",
   "ZONA COMUNEROS": "COMUNEROS",
   "ZONA YUMBO": "YUMBO",
   "ZONA ALFONSO LOPEZ": "ALFONSO LOPEZ",
 
+
+
+
   "ZONA HUILA 6": "HUILA DISTRITO 6",
   "ZONA GARZON": "HUILA DISTRITO 6",
   "HUILA 6": "HUILA DISTRITO 6",
+
+
+
 
   "ZONA TOLIMA 2.1": "TOLIMA DISTRITO 2.1",
   "ZONA TOLIMA 2.2": "TOLIMA DISTRITO 2.2",
   "ZONA TOLIMA 3": "TOLIMA DISTRITO 3",
 
+
+
+
   "ZONA CUCUTA 1": "CUCUTA 1",
   "ZONA CUCUTA 3": "CUCUTA 3",
   "ZONA PATIOS": "LOS PATIOS",
   "ZONA VILLA DEL ROSARIO": "VILLA DEL ROSARIO",
+
+
+
 
   "ZONA MEDELLIN - BELLO METROP": "BELLO METROPOLITANO",
   "ZONA MEDELLIN - BELLO NORTE": "BELLO NORTE",
@@ -115,12 +170,21 @@ const DISTRICT_ALIAS = {
   "ZONA MEDELLIN - OCC 4": "MEDELLIN OCCIDENTAL 4",
   "MEDELLIN OCCIDENTAL": "MEDELLIN OCCIDENTAL 4",
 
+
+
+
   "ZONA B/MANGA 1": "BUCARAMANGA 1",
   "ZONA B/MANGA 2": "BUCARAMANGA 2",
   "ZONA B/MANGA 3": "BUCARAMANGA 2",
 
+
+
+
   "ZONA FLORIDABLANCA 1": "FLORIDABLANCA 1",
   "ZONA FLORIDABLANCA 2": "FLORIDABLANCA 1",
+
+
+
 
   "ZONA FLORALIA": "FLORALIA",
   "ZONA EL JARDIN": "EL JARDIN",
@@ -129,15 +193,27 @@ const DISTRICT_ALIAS = {
   "B/MANGA 2": "BUCARAMANGA 2",
   "B/MANGA 3": "BUCARAMANGA 2",
 
+
+
+
   // --- CAUCA ---
   "CAUCA 4": "CAUCA 1",
+
+
+
 
   // --- FLORIDABLANCA ---
   "FLORIDABLANCA 2": "FLORIDABLANCA 1",
 
+
+
+
   // --- GARZON (HUILA) ---
   "GARZON": "HUILA DISTRITO 6",
   "ZONA GARZON": "HUILA DISTRITO 6",
+
+
+
 
   // --- MEDELLIN ---
   "MEDELLIN - NOROCC 1": "MEDELLIN NOROCCIDENTE 1",
@@ -146,9 +222,18 @@ const DISTRICT_ALIAS = {
   "MEDELLIN - OCC 2": "MEDELLIN OCCIDENTAL 4",
   "MEDELLIN - OCC 4": "MEDELLIN OCCIDENTAL 4",
 
+
+
+
   // --- OCAÑA ---
   "OCANA": "CUCUTA 3",
   "ZONA OCANA": "CUCUTA 3",
+
+
+
+
+
+
 
 
   // --- CALI / VALLE GRANDE ---
@@ -158,17 +243,29 @@ const DISTRICT_ALIAS = {
   "ZONA CAUCA 1": "CAUCA DISTRITO 1",
   "CAUCA 4": "CAUCA DISTRITO 1",
 
+
+
+
   // ---- HUILA ----
   "ZONA HUILA 6": "HUILA DISTRITO 6",
+
+
+
 
   // ---- MEDELLÍN NOROCCIDENTE ----
   "MEDELLIN NOROCCIDENTE 1": "MEDELLIN NOROCCIDENTE 1",
   "ZONA MEDELLIN NOROCC 1": "MEDELLIN NOROCCIDENTE 1",
   "MEDELLIN - NOROCC 1": "MEDELLIN NOROCCIDENTE 1",
 
+
+
+
   "MEDELLIN NOROCCIDENTE 2": "MEDELLIN NOROCCIDENTE 2",
   "ZONA MEDELLIN NOROCC 2": "MEDELLIN NOROCCIDENTE 2",
   "MEDELLIN - NOROCC 2": "MEDELLIN NOROCCIDENTE 2",
+
+
+
 
   // ---- MEDELLIN OCCIDENTAL ----
   "MEDELLIN OCCIDENTAL 4": "MEDELLIN OCCIDENTAL 4",
@@ -176,10 +273,22 @@ const DISTRICT_ALIAS = {
   "ZONA MEDELLIN OCC 4": "MEDELLIN OCCIDENTAL 4",
   "MEDELLIN - OCC 2": "MEDELLIN OCCIDENTAL 4", // ajuste por inexistencia
 
+
+
+
   // ---- TOLIMA ----
 
 
+
+
+
+
+
+
   "ZONA TOLIMA 3": "TOLIMA DISTRITO 3",
+
+
+
 
   // ---- CALI / VALLE ----
   "VALLE GRANDE": "CHIPICHAPE",
@@ -190,6 +299,12 @@ const DISTRICT_ALIAS = {
   "CAUCA 4": "CAUCA DISTRITO 1",
 
 
+
+
+
+
+
+
   // ---- MEDELLIN OCCIDENTAL ----
   "MEDELLIN OCCIDENTAL": "MEDELLIN OCCIDENTAL 4",
   "MEDELLIN OCCIDENTAL 4": "MEDELLIN OCCIDENTAL 4",
@@ -197,14 +312,23 @@ const DISTRICT_ALIAS = {
   "MEDELLIN - OCC 4": "MEDELLIN OCCIDENTAL 4",
   "MEDELLIN": "MEDELLIN OCCIDENTAL 4",
 
+
+
+
   // ---- MED NOROCCIDENTE ----
   "MEDELLIN NOROCCIDENTE 1": "MEDELLIN NOROCCIDENTE 1",
   "ZONA MEDELLIN NOROCC 1": "MEDELLIN NOROCCIDENTE 1",
   "MEDELLIN - NOROCC 1": "MEDELLIN NOROCCIDENTE 1",
 
+
+
+
   "MEDELLIN NOROCCIDENTE 2": "MEDELLIN NOROCCIDENTE 2",
   "ZONA MEDELLIN NOROCC 2": "MEDELLIN NOROCCIDENTE 2",
   "MEDELLIN - NOROCC 2": "MEDELLIN NOROCCIDENTE 2",
+
+
+
 
   // ---- TOLIMA 2.1 ----
   "ZONA TOLIMA 2.1 (ESPINAL)": "TOLIMA 2.1",
@@ -212,67 +336,59 @@ const DISTRICT_ALIAS = {
   "ZONA TOLIMA 2.1 (GUAMO)": "TOLIMA DISTRITO 2.1",
   "ZONA TOLIMA 2.1 GUAMO": "TOLIMA DISTRITO 2.1",
 
+
+
+
   // ---- TOLIMA 2.2 ----
   "ZONA TOLIMA 2.2 (FLANDES)": "TOLIMA DISTRITO 2.2",
   "ZONA TOLIMA 2.2 FLANDES": "TOLIMA DISTRITO 2.2",
   "ZONA TOLIMA 2.2 (MELGAR)": "TOLIMA DISTRITO 2.2",
   "ZONA TOLIMA 2.2 MELGAR": "TOLIMA DISTRITO 2.2",
 
+
+
+
   // ---- TOLIMA 3 ----
   "ZONA TOLIMA 3 (IBAGUE)": "TOLIMA 3",
   "ZONA TOLIMA 3 IBAGUE": "TOLIMA DISTRITO 3",
 };
 
-// ----------------------------------------------------------
-// FUNCIÓN CANONIZADORA DEFINITIVA
-// ----------------------------------------------------------
+
+
 function canonizeDistrict(raw) {
   if (!raw) return "";
-
   let t = norm(raw);
 
-  // 1. eliminar prefijo "ZONA"
   t = t.replace(/^ZONA\s+/, "").trim();
 
-  // 2. si es alias exacto
-  if (DISTRICT_ALIAS[t]) {
-    return norm(DISTRICT_ALIAS[t]);
-  }
+  if (DISTRICT_ALIAS[t]) return norm(DISTRICT_ALIAS[t]);
+  if (DISTRICT_STD[t]) return norm(DISTRICT_STD[t]);
 
-  // 3. si es estándar exacto
-  if (DISTRICT_STD[t]) {
-    return norm(DISTRICT_STD[t]);
-  }
-
-  // 4. reparaciones suaves
   t = t.replace(/V\/CIO/g, "VILLAVICENCIO");
 
-  // 5. búsqueda aproximada
   for (const std of Object.values(DISTRICT_STD)) {
     const nstd = norm(std);
     if (t.includes(nstd)) return nstd;
     if (nstd.includes(t)) return nstd;
   }
 
-  return t; // fallback
+  return t;
 }
 
 // ======================================================================
-// 2) RESOLVER JERARQUÍA
+//  JERARQUÍA
 // ======================================================================
-function resolveJerarquia(row) {
-  const raw = norm(row.jerarquia_raw || row.jerarquia || row.cargo_raw || "");
-
+function resolveJerarquia(j) {
+  const raw = norm(j.jerarquia_raw || j.jerarquia || j.cargo_raw || "");
   if (raw.includes("GEREN")) return "GERENCIA";
   if (raw.includes("DIREC")) return "DIRECCION";
-  if (raw.includes("COOR")) return "COORDINACION";
-  if (raw.includes("ASES")) return "ASESORIA";
-
+  if (raw.includes("COOR"))  return "COORDINACION";
+  if (raw.includes("ASES"))  return "ASESORIA";
   return null;
 }
 
 // ======================================================================
-// 3) ORG UNITS
+//  ORG UNITS
 // ======================================================================
 async function getOrCreateOrgUnit(name, type, parent = null) {
   const nm = norm(name);
@@ -294,22 +410,25 @@ async function getOrCreateOrgUnit(name, type, parent = null) {
 }
 
 // ======================================================================
-// 4) USERS
+// USERS — CORREGIDO PARA NO SOBRESCRIBIR CONTRASEÑAS
 // ======================================================================
 async function getOrCreateUser(row, orgUnit, inheritedRegional = null, coordinatorId = null) {
   const phone = row.telefono_raw || "0000";
-
   let email = row.correo_raw;
+
   if (!email || norm(email) === "NO CONTRATADO") {
     email = `${row.cedula}@movilco.com`;
   }
 
-  const passHash = `$2b$10$PASS_${phone}_PLACEHOLDER`;
-
   const exists = await pool.query(
-    `SELECT id FROM core.users WHERE document_id=$1 LIMIT 1`,
+    `SELECT id, password_hash FROM core.users WHERE document_id=$1 LIMIT 1`,
     [row.cedula]
   );
+
+  const passHash =
+    exists.rows.length && exists.rows[0].password_hash
+      ? exists.rows[0].password_hash
+      : `$2b$10$DEFAULT_${phone}_${row.cedula}`;
 
   const payload = [
     row.nombre_raw || "SIN NOMBRE",
@@ -333,7 +452,6 @@ async function getOrCreateUser(row, orgUnit, inheritedRegional = null, coordinat
     row.cierre_raw
   ];
 
-  // UPDATE
   if (exists.rows.length) {
     const id = exists.rows[0].id;
 
@@ -351,7 +469,6 @@ async function getOrCreateUser(row, orgUnit, inheritedRegional = null, coordinat
     return id;
   }
 
-  // INSERT
   const inserted = await pool.query(
     `INSERT INTO core.users
      (name,email,phone,role,password_hash,active,
@@ -359,8 +476,7 @@ async function getOrCreateUser(row, orgUnit, inheritedRegional = null, coordinat
       regional,coordinator_id,cargo,capacity,jerarquia,
       presupuesto,ejecutado,cierre_porcentaje)
      VALUES
-     ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
-      $12,$13,$14,$15,$16,$17,$18,$19)
+     ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
      RETURNING id`,
     payload
   );
@@ -369,83 +485,202 @@ async function getOrCreateUser(row, orgUnit, inheritedRegional = null, coordinat
 }
 
 // ======================================================================
-// 5) PROMOTE PRINCIPAL
+// BACKUP HISTÓRICO CORRECTO
+// ======================================================================
+async function backupPresupuesto(periodo) {
+  await pool.query(
+    `
+      INSERT INTO historico.presupuesto_jerarquia_backup (
+        id, jerarquia_raw, cargo_raw, cedula, nombre_raw, contratado_raw,
+        distrito_raw, regional_raw, fecha_inicio, fecha_fin,
+        presupuesto_raw, ejecutado_raw, cierre_raw, capacidad_raw,
+        telefono_raw, correo_raw, periodo
+      )
+      SELECT
+        id, jerarquia_raw, cargo_raw, cedula, nombre_raw, contratado_raw,
+        distrito_raw, regional_raw, fecha_inicio, fecha_fin,
+        presupuesto_raw, ejecutado_raw, cierre_raw, capacidad_raw,
+        telefono_raw, correo_raw,
+        $1 AS periodo
+      FROM core.presupuesto_jerarquia;
+    `,
+    [periodo]
+  );
+
+  console.log(`[BACKUP PJ] Backup histórico creado para periodo ${periodo}`);
+}
+
+// ======================================================================
+//  PROMOTE PRINCIPAL — VERSIÓN FINAL
 // ======================================================================
 export async function promotePresupuestoJerarquia() {
+  const client = await pool.connect();
 
-  const { rows } = await pool.query(`SELECT * FROM core.presupuesto_jerarquia`);
+  try {
+    await client.query("BEGIN");
 
-  if (!rows.length)
-    return { ok: false, message: "Tabla presupuesto_jerarquia vacía" };
+    // ============================================================
+    // 0) PERIODO ACTUAL
+    // ============================================================
+    const periodo = new Date().toISOString().slice(0, 7);
+    const [yy, mm] = periodo.split("-").map(Number);
 
-  const ger = [], dir = [], coord = [], ases = [];
+    // ============================================================
+    // 1) Cargar datos actuales del archivo (staging)
+    // ============================================================
+    const { rows: staging } = await client.query(`
+      SELECT *
+      FROM staging.presupuesto_jerarquia
+      ORDER BY cedula ASC
+    `);
 
-  // PRE-PROCESAR FILAS
-  for (const r of rows) {
-    r.role = resolveJerarquia(r);
-    r.distrito_raw = canonizeDistrict(r.distrito_raw);
+    if (!staging.length)
+      return { ok: false, message: "staging.presupuesto_jerarquia está vacío" };
 
-    if (!r.role) continue;
+    // ============================================================
+    // 2) Marcar TODOS los usuarios como inactivos en este periodo
+    // ============================================================
+    await client.query(`
+      UPDATE core.presupuesto_jerarquia
+      SET activo_en_periodo = false
+      WHERE period_year = $1 AND period_month = $2
+    `, [yy, mm]);
 
-    if (r.role === "GERENCIA") ger.push(r);
-    else if (r.role === "DIRECCION") dir.push(r);
-    else if (r.role === "COORDINACION") coord.push(r);
-    else if (r.role === "ASESORIA") ases.push(r);
-  }
-
-  const MGER = {};
-  const MDIR = {};
-  const MCOOR = {};
-
-  // 1) GERENCIA
-  for (const g of ger) {
-    const unit = await getOrCreateOrgUnit("GERENCIA COMERCIAL", "GERENCIA", null);
-    const user = await getOrCreateUser(g, unit);
-    MGER["GERENCIA COMERCIAL"] = { user, unit };
-  }
-
-  const gerPrincipal = MGER["GERENCIA COMERCIAL"]?.unit || null;
-
-  // 2) DIRECCIÓN
-  for (const d of dir) {
-    const unit = await getOrCreateOrgUnit(d.distrito_raw, "DIRECCION", gerPrincipal);
-    const user = await getOrCreateUser(d, unit, d.regional_raw);
-    MDIR[d.distrito_raw] = { user, unit };
-  }
-
-  // 3) COORDINACIÓN
-  for (const c of coord) {
-    const dirInfo = MDIR[c.distrito_raw];
-    const parentUnit = dirInfo?.unit || null;
-    const parentUser = dirInfo?.user || null;
-
-    const unit = await getOrCreateOrgUnit(c.distrito_raw, "COORDINACION", parentUnit);
-    const user = await getOrCreateUser(c, unit, c.regional_raw, parentUser);
-
-    MCOOR[c.distrito_raw] = { user, unit, regional: c.regional_raw };
-  }
-
-  // 4) ASESORIA
-  for (const a of ases) {
-    const districtCanon = canonizeDistrict(a.distrito_raw);
-    const parent = MCOOR[districtCanon];
-
-    if (!parent) {
-      console.warn(`⚠ Asesor sin coordinador: ${a.nombre_raw} (${a.distrito_raw})`);
-      continue;
+    // ============================================================
+    // 3) Procesar staging → insertar o actualizar registros del periodo
+    // ============================================================
+    for (const r of staging) {
+      await client.query(`
+        INSERT INTO core.presupuesto_jerarquia (
+          cedula, nombre_raw, cargo_raw, distrito_raw, regional_raw,
+          presupuesto_raw, capacidad_raw, telefono_raw, correo_raw,
+          period_year, period_month, activo_en_periodo
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true)
+        ON CONFLICT (cedula, period_year, period_month)
+        DO UPDATE SET
+          nombre_raw = EXCLUDED.nombre_raw,
+          cargo_raw = EXCLUDED.cargo_raw,
+          distrito_raw = EXCLUDED.distrito_raw,
+          regional_raw = EXCLUDED.regional_raw,
+          presupuesto_raw = EXCLUDED.presupuesto_raw,
+          capacidad_raw = EXCLUDED.capacidad_raw,
+          telefono_raw = EXCLUDED.telefono_raw,
+          correo_raw = EXCLUDED.correo_raw,
+          activo_en_periodo = true
+      `, [
+        r.cedula,
+        r.nombre,
+        r.cargo,
+        r.distrito,
+        r.regional,
+        r.presupuesto,
+        r.capacidad,
+        r.telefono,
+        r.correo,
+        yy,
+        mm
+      ]);
     }
 
-    await getOrCreateUser(a, parent.unit, parent.regional, parent.user);
-  }
+    // ============================================================
+    // 4) Cargar nuevamente los registros para reconstrucción jerárquica
+    // ============================================================
+    const { rows } = await client.query(`
+      SELECT *
+      FROM core.presupuesto_jerarquia
+      WHERE period_year = $1 AND period_month = $2 AND activo_en_periodo = true
+      ORDER BY id ASC
+    `, [yy, mm]);
 
-  return {
-    ok: true,
-    message: "📌 Promote completado correctamente",
-    totals: {
-      gerentes: ger.length,
-      directores: dir.length,
-      coordinadores: coord.length,
-      asesores: ases.length
+    // ============================================================
+    // 5) Restaurar jerarquía actual (MISMO CÓDIGO QUE YA TENÍAS)
+    // ============================================================
+    await client.query(`
+      UPDATE core.users
+      SET org_unit_id = NULL,
+          coordinator_id = NULL,
+          jerarquia = NULL,
+          presupuesto = NULL,
+          ejecutado = NULL,
+          cierre_porcentaje = NULL,
+          capacidad = NULL,
+          updated_at = NOW()
+    `);
+
+    const ger = [], dir = [], coord = [], ases = [];
+
+    for (const r of rows) {
+      r.role = resolveJerarquia(r);
+      r.distrito_raw = canonizeDistrict(r.distrito_raw);
+
+      if (!r.role) continue;
+
+      if (r.role === "GERENCIA") ger.push(r);
+      else if (r.role === "DIRECCION") dir.push(r);
+      else if (r.role === "COORDINACION") coord.push(r);
+      else ases.push(r);
     }
-  };
+
+    const MGER = {}, MDIR = {}, MCOOR = {};
+
+    // GERENCIA
+    for (const g of ger) {
+      const unit = await getOrCreateOrgUnit("GERENCIA COMERCIAL", "GERENCIA", null);
+      const user = await getOrCreateUser(g, unit);
+      MGER["GERENCIA COMERCIAL"] = { unit, user };
+    }
+
+    const gerUnit = MGER["GERENCIA COMERCIAL"]?.unit || null;
+
+    // DIRECCIÓN
+    for (const d of dir) {
+      const unit = await getOrCreateOrgUnit(d.distrito_raw, "DIRECCION", gerUnit);
+      const user = await getOrCreateUser(d, unit, d.regional_raw);
+      MDIR[d.distrito_raw] = { unit, user };
+    }
+
+    // COORDINACIÓN
+    for (const c of coord) {
+      const parent = MDIR[c.distrito_raw];
+      const parentUnit = parent?.unit || null;
+      const parentUser = parent?.user || null;
+
+      const unit = await getOrCreateOrgUnit(c.distrito_raw, "COORDINACION", parentUnit);
+      const user = await getOrCreateUser(c, unit, c.regional_raw, parentUser);
+
+      MCOOR[c.distrito_raw] = { unit, user, regional: c.regional_raw };
+    }
+
+    // ASESORÍA
+    for (const a of ases) {
+      const d = canonizeDistrict(a.distrito_raw);
+      const parent = MCOOR[d];
+
+      if (!parent) {
+        console.warn(`⚠ Asesor sin coordinador: ${a.nombre_raw}`);
+        continue;
+      }
+
+      await getOrCreateUser(a, parent.unit, parent.regional, parent.user);
+    }
+
+    await client.query("COMMIT");
+
+    return {
+      ok: true,
+      message: "Promote Presupuesto Jerarquía completado correctamente",
+      periodo,
+      activos_en_periodo: rows.length
+    };
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("[ERROR PROMOTE PJ]", err);
+    throw err;
+
+  } finally {
+    client.release();
+  }
 }
+

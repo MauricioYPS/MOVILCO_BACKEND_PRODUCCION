@@ -1,6 +1,5 @@
 /**************************************************************
  * KPI SAVE CONTROLLER — Versión FINAL
- * Compatible con el nuevo kpi.save.service.js
  **************************************************************/
 
 import { saveKpiForPeriod } from "../../services/kpi.save.service.js";
@@ -9,9 +8,6 @@ export async function saveKpiController(req, res) {
   try {
     const { period } = req.query;
 
-    /**********************************************************
-     * 1. Validación del parámetro ?period=YYYY-MM
-     **********************************************************/
     if (!period) {
       return res.status(400).json({
         ok: false,
@@ -31,9 +27,6 @@ export async function saveKpiController(req, res) {
     console.log(`[KPI SAVE] Solicitud recibida para periodo ${period}`);
     console.log("====================================\n");
 
-    /**********************************************************
-     * 2. Ejecutar guardado del KPI mensual
-     **********************************************************/
     const result = await saveKpiForPeriod(period);
 
     console.log("\n====================================");
@@ -41,15 +34,13 @@ export async function saveKpiController(req, res) {
     console.log(`Registros insertados: ${result.saved}`);
     console.log("====================================\n");
 
-    /**********************************************************
-     * 3. Respuesta al cliente
-     **********************************************************/
     return res.json({
       ok: true,
       message: result.message,
       period: result.period,
 
       registros_guardados: result.saved,
+      registros_omitidos: result.omitted,
 
       total_ventas_reales: result.total_ventas_reales,
       total_ventas_registradas: result.total_ventas_registradas,
@@ -57,13 +48,10 @@ export async function saveKpiController(req, res) {
     });
 
   } catch (e) {
-    console.error("\n🔥 [KPI SAVE Controller] ERROR DETECTADO:");
+    console.error("\n🔥 [KPI SAVE Controller] ERROR:");
     console.error(e);
     console.error("====================================\n");
 
-    /**********************************************************
-     * 4. Error controlado para el cliente
-     **********************************************************/
     return res.status(500).json({
       ok: false,
       error: "No se pudo guardar los KPI del periodo",

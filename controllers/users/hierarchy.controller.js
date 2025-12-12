@@ -36,6 +36,18 @@ async function loadNovedades(userId, period) {
   const { rows } = await pool.query(q, [userId, year, month]);
   return rows;
 }
+async function loadCoordinatorUser(coordUnitId) {
+  const q = `
+    SELECT id, name, document_id, active
+    FROM core.users
+    WHERE org_unit_id = $1
+    ORDER BY created_at ASC
+    LIMIT 1
+  `;
+  const { rows } = await pool.query(q, [coordUnitId]);
+  return rows[0] || null;
+}
+
 
 /********************************************************************************************
  * 1. ASESOR POR COORDINADOR
@@ -150,12 +162,12 @@ export async function getCoordinadoresByDireccion(req, res) {
       });
     }
 
-    // 3. Asesores por coordinación (paralelo)
+    // 3. Cargar asesores por coordinación
     const advisorsByCoord = await Promise.all(
       coordUnits.map((cu) => loadAsesoresByCoord(cu.id))
     );
 
-    // 4. Aplanar asesores manteniendo referencia a coordinación
+    // 4. Aplanar asesores agregando referencia de la coordinación
     const asesoresExtendidos = [];
     for (let i = 0; i < coordUnits.length; i++) {
       const cu = coordUnits[i];
@@ -171,6 +183,7 @@ export async function getCoordinadoresByDireccion(req, res) {
       }
     }
 
+    // Si no hay asesores, retornar coordinaciones con totales 0
     if (!asesoresExtendidos.length) {
       return res.json({
         ok: true,
@@ -178,7 +191,9 @@ export async function getCoordinadoresByDireccion(req, res) {
         periodo: period,
         total: coordUnits.length,
         coordinadores: coordUnits.map((cu) => ({
-          id: cu.id,
+          coord_unit_id: cu.id,
+          id: null,
+          coordinator_name: null,
           name: cu.name,
           unit_type: cu.unit_type,
           total_asesores: 0,
@@ -189,12 +204,12 @@ export async function getCoordinadoresByDireccion(req, res) {
       });
     }
 
-    // 5. KPI para cada asesor (en paralelo, como ya tenías)
+    // 5. KPI en paralelo
     const resumes = await Promise.all(
       asesoresExtendidos.map((a) => getKpiResume(a, period))
     );
 
-    // 6. Agregación por coordinación (optimizada)
+    // 6. Agregación por coordinación
     const map = Object.create(null);
 
     for (let i = 0; i < asesoresExtendidos.length; i++) {
@@ -203,10 +218,18 @@ export async function getCoordinadoresByDireccion(req, res) {
 
       let bucket = map[a.coord_id];
       if (!bucket) {
+
+        // Cargar coordinador real de esa coordinación
+        const coordinatorUser = await loadCoordinatorUser(a.coord_id);
+
         bucket = map[a.coord_id] = {
-          id: a.coord_id,
-          name: a.coord_name,
+          coord_unit_id: a.coord_id, // ID org unit
+          id: coordinatorUser ? coordinatorUser.id : null, // ← ID REAL DEL COORDINADOR
+          coordinator_name: coordinatorUser ? coordinatorUser.name : null,
+
+          name: a.coord_name, 
           unit_type: a.coord_unit_type,
+
           total_asesores: 0,
           total_ventas: 0,
           ventas_distrito: 0,
@@ -220,6 +243,7 @@ export async function getCoordinadoresByDireccion(req, res) {
       bucket.ventas_fuera += resumen.ventas_fuera || 0;
     }
 
+    // Convertir mapa a array ordenado
     const coordinadores = Object.values(map).sort((a, b) =>
       a.name.localeCompare(b.name, "es")
     );
@@ -231,6 +255,7 @@ export async function getCoordinadoresByDireccion(req, res) {
       total: coordinadores.length,
       coordinadores,
     });
+
   } catch (err) {
     console.error("[getCoordinadoresByDireccion]", err);
     return res.status(500).json({
@@ -240,6 +265,7 @@ export async function getCoordinadoresByDireccion(req, res) {
     });
   }
 }
+
 
 
 

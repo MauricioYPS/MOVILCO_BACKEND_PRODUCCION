@@ -5,8 +5,8 @@ export const transporter = nodemailer.createTransport({
   port: 587,
   secure: false, 
   auth: {
-    user: "yepes060@gmail.com",
-    pass: "kgse jexu iboa wabx", 
+    user:process.env.TMP_USER,
+    pass:process.env.TMP_PASS, 
   },
   tls: {
     rejectUnauthorized: false
@@ -17,3 +17,11 @@ export const transporter = nodemailer.createTransport({
   rateDelta: 2000,      // mínimo 2 segundos entre envíos (Gmail-friendly)
   rateLimit: 1
 });
+await transporter.sendMail({
+  from: `"Test SMTP" <${process.env.MAIL_USER}>`,
+  to: "devmauricioy@gmail.com",
+  subject: "TEST SMTP MOVILCO",
+  html: "<h1>Prueba SMTP</h1>"
+})
+
+
