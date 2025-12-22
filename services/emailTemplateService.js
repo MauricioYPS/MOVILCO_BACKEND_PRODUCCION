@@ -28,3 +28,34 @@ export function applyPlaceholders(html, data = {}) {
 
   return final;
 }
+export function fillEmailTemplate(html, data = {}) {
+  let output = html;
+
+  // Reemplazo dinámico
+  for (const [key, value] of Object.entries(data)) {
+    output = output.replaceAll(`{${key}}`, String(value ?? ""));
+  }
+
+  // Valores por defecto OBLIGATORIOS (anti-bloqueo Gmail)
+  const defaults = {
+    CIUDAD: "—",
+    FECHA_COMPLETA: new Date().toLocaleDateString("es-CO", {
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    }),
+    GERENTE_NOMBRE: "Gerencia Comercial",
+    GERENTE_CARGO: "Gerente Comercial",
+  };
+
+  for (const [key, value] of Object.entries(defaults)) {
+    output = output.replaceAll(`{${key}}`, value);
+  }
+
+  // Validación final: no deben quedar placeholders
+  if (/{[A-Z0-9_]+}/.test(output)) {
+    throw new Error("La plantilla contiene placeholders sin resolver");
+  }
+
+  return output;
+}

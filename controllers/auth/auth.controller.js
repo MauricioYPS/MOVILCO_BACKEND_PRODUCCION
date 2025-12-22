@@ -35,7 +35,7 @@ export async function login(req, res) {
       email: user.email,
       role: user.role,
       org_unit_id: user.org_unit_id
-    });
+        });
 
     return res.json({
       ok: true,

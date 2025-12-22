@@ -35,6 +35,30 @@ function daysInMonth(year, month) {
   return new Date(year, month, 0).getDate();
 }
 
+async function loadCoordinatorUsersByOrgUnits(coordUnitIds) {
+  if (!coordUnitIds.length) return {};
+
+  const q = `
+    SELECT id, name, org_unit_id
+    FROM core.users
+    WHERE org_unit_id = ANY($1::bigint[])
+      AND active = true
+    ORDER BY id ASC
+  `;
+
+  const { rows } = await pool.query(q, [coordUnitIds]);
+
+  const map = {};
+  for (const u of rows) {
+    if (!map[u.org_unit_id]) {
+      map[u.org_unit_id] = u;
+    }
+  }
+
+  return map;
+}
+
+
 /********************************************************************************************
  * 1. Cargar TODAS LAS DIRECCIONES
  ********************************************************************************************/
@@ -122,6 +146,8 @@ export async function getRegionalDirections(req, res) {
       });
     }
 
+
+
     const { year, month } = per;
     const diasMes = daysInMonth(year, month);
     const diaActual = new Date().getDate();
@@ -169,7 +195,17 @@ export async function getRegionalDirections(req, res) {
       return res.json({ ok: true, total: 0, direcciones: [] });
 
     const resultado = [];
+        // Obtener TODAS las coordinaciones primero
+    const allCoordUnits = [];
+    for (const dir of direcciones) {
+      const coords = await loadCoordUnits(dir.id);
+      allCoordUnits.push(...coords);
+    }
 
+    // Mapa org_unit_id → usuario coordinador
+    const coordUsersMap = await loadCoordinatorUsersByOrgUnits(
+      allCoordUnits.map(c => c.id)
+    );
     /**********************************************
      * 6. Procesar direcciones en paralelo
      **********************************************/
@@ -206,13 +242,24 @@ export async function getRegionalDirections(req, res) {
           totalVentas += ventasCoord;
           totalProrrateo += prorrateoCoord;
 
+          const coordUser = coordUsersMap[coord.id] || null;
+
           detalleCoords.push({
-            id: coord.id,
-            name: coord.name,
+            // 👇 ID REAL DEL COORDINADOR (USUARIO)
+            id: coordUser ? coordUser.id : null,
+
+            coord_user_id: coordUser ? coordUser.id : null,
+            coord_user_name: coordUser ? coordUser.name : null,
+
+            // 👇 ID DE LA COORDINACIÓN (ORG_UNIT)
+            coord_unit_id: coord.id,
+            coord_unit_name: coord.name,
+
             total_asesores: asesores.length,
             ventas: ventasCoord,
             prorrateo: prorrateoCoord
           });
+
         })
       );
 
