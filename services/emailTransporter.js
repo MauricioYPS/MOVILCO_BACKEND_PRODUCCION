@@ -11,17 +11,17 @@ export const transporter = nodemailer.createTransport({
   tls: {
     rejectUnauthorized: false
   },
-  pool: true,           // conexión en pool (mejor rendimiento)
-  maxConnections: 5,    // máximo de conexiones simultáneas
-  maxMessages: 50,      // máximo de mensajes por conexión
-  rateDelta: 2000,      // mínimo 2 segundos entre envíos (Gmail-friendly)
+  pool: true,           
+  maxConnections: 5,    
+  maxMessages: 50,     
+  rateDelta: 2000,    
   rateLimit: 1
 });
-await transporter.sendMail({
-  from: `"Test SMTP" <${process.env.MAIL_USER}>`,
-  to: "devmauricioy@gmail.com",
-  subject: "TEST SMTP MOVILCO",
-  html: "<h1>Prueba SMTP</h1>"
-})
+// await transporter.sendMail({
+//   from: `"Test SMTP" <${process.env.MAIL_USER}>`,
+//   to: "devmauricioy@gmail.com",
+//   subject: "TEST SMTP MOVILCO",
+//   html: "<h1>Prueba SMTP</h1>"
+// })
 
 

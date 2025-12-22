@@ -62,7 +62,7 @@ export async function sendEmailTemplate({ codigo, to, data = {}, user_id = null,
 
   try {
     const info = await transporter.sendMail({
-      from: "yepes060@gmail.com",
+      from: "ypsplay@gmail.com",
       to,
       subject: template.asunto,
       html: htmlFinal
