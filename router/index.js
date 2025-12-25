@@ -19,6 +19,7 @@ import authRouter from './auth.router.js'
 import regionalRouer from './regional.js'
 import emailRouter from './email.js'
 import historicoRouter from './historico.js'
+import siappRouter from './siapp.js'
 
 const router = Router()
 
@@ -41,4 +42,5 @@ router.use('/mail' ,mailRouter)
 router.use('/regional' ,regionalRouer)
 router.use('/email' ,emailRouter)
 router.use('/historico' ,historicoRouter)
+router.use('/siapp' ,siappRouter)
 export default router
