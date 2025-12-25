@@ -1,7 +1,15 @@
 /**************************************************************
- * KPI CALCULATE SERVICE — Versión final 2025-12 ACTUALIZADA
- * - Solo calcula KPI para asesores ACTIVOS en el periodo
- * - Mantiene TODA tu lógica previa
+ * KPI CALCULATE SERVICE — Versión 2025-12-24 (ACTUALIZADA)
+ *
+ * Cambios clave:
+ *  - Sigue calculando KPI SOLO para asesores presentes en core.users (contratados/activos en tu sistema).
+ *  - Ahora captura TODAS las ventas cuyo asesor NO existe en core.users y las guarda en:
+ *      kpi.asesores_fuera_presupuesto
+ *    (histórico completo: inactivos, externos, fuera nómina, etc.)
+ *
+ * Nota:
+ *  - Esto NO “contamina” core.users con usuarios fantasma.
+ *  - Permite auditar e investigar el histórico completo por mes via /api/kpi/unknown
  **************************************************************/
 import { getDiasLaboradosManual } from "./kpi.dias-manual.service.js";
 import pool from "../config/database.js";
@@ -56,16 +64,13 @@ export function calcProrrateo({ presupuesto = 13, diasLaborados, totalMes }) {
 /**********************************************************************
  * 2. CONSULTAS BD
  **********************************************************************/
-
 export async function loadAllSalesForPeriod({ year, month }) {
-
   const q = `
     -- =============================
     -- 1) MANUAL SALES NORMALIZED
     -- =============================
     WITH manual_sales AS (
       SELECT
-        -- columnas que SI existen en generated_sales
         idasesor,
         nombreasesor,
         division,
@@ -109,7 +114,6 @@ export async function loadAllSalesForPeriod({ year, month }) {
         period_month,
 
         'manual' AS source
-
       FROM siapp.generated_sales
       WHERE (
         fecha IS NOT NULL
@@ -193,9 +197,10 @@ export async function loadAllSalesForPeriod({ year, month }) {
   return rows;
 }
 
-
-/** SOLO CARGAMOS USUARIOS ACTIVOS EN EL PERIODO **/
-async function loadActiveUsersForPeriod({ year, month }) {
+/** CARGAMOS USUARIOS (los que existen en core.users) **/
+async function loadUsersForPeriod({ year, month }) {
+  // Nota: actualmente no filtras por periodo aquí; el “activo” lo define tu data de users/presupuesto.
+  // Esto se mantiene para no romper tu lógica actual.
   const q = `
     SELECT 
       u.id,
@@ -216,7 +221,6 @@ async function loadActiveUsersForPeriod({ year, month }) {
 
   const { rows } = await pool.query(q);
 
-  // Construcción del map que KPI necesita
   const map = {};
   for (const u of rows) {
     if (u.document_id) {
@@ -226,8 +230,6 @@ async function loadActiveUsersForPeriod({ year, month }) {
 
   return { list: rows, map };
 }
-
-
 
 export async function loadNovedadesForPeriod({ year, month }) {
   const q = `
@@ -258,11 +260,106 @@ export async function loadDistrictMap() {
 }
 
 /**********************************************************************
- * 3. PERSISTENCIA KPI
+ * 3. PERSISTENCIA KPI + OUT-OF-PAYROLL SALES
  **********************************************************************/
 async function clearKpiPeriod(year, month) {
   await pool.query("DELETE FROM kpi.kpi_resultados_detalle WHERE period_year=$1 AND period_month=$2", [year, month]);
   await pool.query("DELETE FROM kpi.kpi_resultados WHERE period_year=$1 AND period_month=$2", [year, month]);
+}
+
+// Limpia ventas fuera de presupuesto/nómina para el periodo (para idempotencia)
+async function clearUnknownSalesPeriod(year, month) {
+  await pool.query("DELETE FROM kpi.asesores_fuera_presupuesto WHERE period_year=$1 AND period_month=$2", [year, month]);
+}
+
+// Inserta ventas “unknown” en batch (evita 3000 inserts uno a uno)
+async function saveUnknownSalesBatch(rows, year, month) {
+  if (!rows?.length) return 0;
+
+  const cols = [
+    "period_year", "period_month",
+    "estado_liquidacion", "linea_negocio", "cuenta", "ot",
+    "idasesor", "nombreasesor", "cantserv", "tipored", "division",
+    "area", "zona", "poblacion", "d_distrito", "renta", "fecha", "venta",
+    "tipo_registro", "estrato", "paquete_pvd", "mintic", "tipo_prodcuto",
+    "ventaconvergente", "venta_instale_dth", "sac_final",
+    "cedula_vendedor", "nombre_vendedor", "modalidad_venta",
+    "tipo_vendedor", "tipo_red_comercial", "nombre_regional",
+    "nombre_comercial", "nombre_lider", "retencion_control",
+    "observ_retencion", "tipo_contrato",
+    "tarifa_venta", "comision_neta", "punto_equilibrio"
+  ];
+
+  const chunkSize = 500;
+  let inserted = 0;
+
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+
+    const values = [];
+    const placeholders = [];
+
+    let p = 1;
+    for (const r of chunk) {
+      // period_year/period_month del KPI “solicitado” (no del row),
+      // porque este histórico lo estás consultando por periodo del sistema.
+      values.push(
+        year, month,
+        r.estado_liquidacion ?? null,
+        r.linea_negocio ?? null,
+        r.cuenta ?? null,
+        r.ot ?? null,
+        r.idasesor ?? null,
+        r.nombreasesor ?? null,
+        r.cantserv ?? null,
+        r.tipored ?? null,
+        r.division ?? null,
+        r.area ?? null,
+        r.zona ?? null,
+        r.poblacion ?? null,
+        r.d_distrito ?? null,
+        r.renta ?? null,
+        r.fecha ?? null,
+        r.venta ?? null,
+        r.tipo_registro ?? null,
+        r.estrato ?? null,
+        r.paquete_pvd ?? null,
+        r.mintic ?? null,
+        r.tipo_prodcuto ?? null,
+        r.ventaconvergente ?? null,
+        r.venta_instale_dth ?? null,
+        r.sac_final ?? null,
+        r.cedula_vendedor ?? null,
+        r.nombre_vendedor ?? null,
+        r.modalidad_venta ?? null,
+        r.tipo_vendedor ?? null,
+        r.tipo_red_comercial ?? null,
+        r.nombre_regional ?? null,
+        r.nombre_comercial ?? null,
+        r.nombre_lider ?? null,
+        r.retencion_control ?? null,
+        r.observ_retencion ?? null,
+        r.tipo_contrato ?? null,
+        r.tarifa_venta ?? null,
+        r.comision_neta ?? null,
+        r.punto_equilibrio ?? null
+      );
+
+      const rowPH = [];
+      for (let k = 0; k < cols.length; k++) rowPH.push(`$${p++}`);
+      placeholders.push(`(${rowPH.join(",")})`);
+    }
+
+    const q = `
+      INSERT INTO kpi.asesores_fuera_presupuesto (${cols.join(",")})
+      VALUES ${placeholders.join(",")}
+    `;
+
+    const res = await pool.query(q, values);
+    inserted += res.rowCount || chunk.length;
+  }
+
+  return inserted;
 }
 
 async function saveKpiHeader(kpi, year, month) {
@@ -425,12 +522,13 @@ export async function calculateKpiForPeriod(period) {
   if (!per) throw new Error("Periodo inválido. Usa YYYY-MM");
   const { year, month } = per;
 
+  // Limpieza idempotente
   await clearKpiPeriod(year, month);
+  await clearUnknownSalesPeriod(year, month);
 
-  // Cargamos SOLO asesores ACTIVOS en el periodo
   const [sales, usersData, novedades, districtMap] = await Promise.all([
     loadAllSalesForPeriod({ year, month }),
-    loadActiveUsersForPeriod(year, month),
+    loadUsersForPeriod({ year, month }),
     loadNovedadesForPeriod({ year, month }),
     loadDistrictMap()
   ]);
@@ -447,16 +545,28 @@ export async function calculateKpiForPeriod(period) {
     novedadesPorCedula[ced].push(n);
   }
 
-  // Mapa de ventas
+  // Mapa de ventas + captura unknown
   const ventasPorAsesor = {};
+  const unknownSales = [];
+
   for (const row of sales) {
     const ced = extractAsesorCedula(row);
     if (!ced) continue;
+
     const asesor = usersMap[ced];
-    if (!asesor) continue; // Ignorar ventas de usuarios inactivos
+
+    if (!asesor) {
+      // Este asesor NO existe en core.users -> histórico fuera nómina/presupuesto
+      unknownSales.push(row);
+      continue;
+    }
+
     if (!ventasPorAsesor[ced]) ventasPorAsesor[ced] = [];
     ventasPorAsesor[ced].push(row);
   }
+
+  // Guardar ventas unknown (histórico completo)
+  const unknownInserted = await saveUnknownSalesBatch(unknownSales, year, month);
 
   const totalMes = daysInMonth(year, month);
   const kpiRows = [];
@@ -479,7 +589,7 @@ export async function calculateKpiForPeriod(period) {
     if (manual) dias = manual.dias;
 
     const prorrateo = calcProrrateo({
-      presupuesto: Number(u.presupuesto) || 13,
+      presupuesto: Number(u.presupuesto_mes) || 13,
       diasLaborados: dias,
       totalMes
     });
@@ -507,8 +617,10 @@ export async function calculateKpiForPeriod(period) {
     ok: true,
     periodo: { year, month },
     activos: users.length,
-    total_ventas: sales.length,
-    total_kpi: kpiRows.length,
+    total_ventas: sales.length, // full_sales + generated_sales del periodo
+    total_kpi: kpiRows.length,  // asesores presentes en core.users
+    unknown_ventas_total: unknownSales.length,
+    unknown_ventas_insertadas: unknownInserted,
     kpis: kpiRows
   };
 }
