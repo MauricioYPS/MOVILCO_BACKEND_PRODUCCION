@@ -11,7 +11,7 @@ export async function login(req, res) {
 
     // Buscar usuario
     const q = `
-      SELECT id, name, email, password_hash, org_unit_id, document_id, role
+      SELECT id, name, email, password_hash, org_unit_id, document_id, role, active
       FROM core.users
       WHERE email = $1
       LIMIT 1
@@ -21,6 +21,16 @@ export async function login(req, res) {
 
     if (!user)
       return res.status(404).json({ ok: false, error: "Usuario no encontrado" });
+
+    // Bloquear login si el usuario está inactivo
+    if (user.active === false) {
+      return res.status(403).json({
+        ok: false,
+        code: "USER_INACTIVE",
+        error:
+          "Tu cuenta está inactiva. El acceso ha sido restringido. Comunícate con Recursos Humanos."
+      });
+    }
 
     // Si no tiene contrasena guardada, avisar que debe registrarla
     if (!user.password_hash) {
@@ -62,6 +72,7 @@ export async function login(req, res) {
     return res.status(500).json({ ok: false, error: "Error interno del servidor" });
   }
 }
+
 
 export async function register(req, res) {
   try {

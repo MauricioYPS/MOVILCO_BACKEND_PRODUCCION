@@ -3,8 +3,9 @@ import pool from "../config/database.js";
 export async function validateCoordinatorAccess(req, res, next) {
   try {
     const usuario = req.user;
-
-    if (usuario.role !== "COORDINADOR")
+    console.log(req.user);
+    
+    if (usuario.role !== "COORDINACION")
       return res.status(403).json({ ok: false, error: "Solo coordinadores pueden acceder" });
 
     const coordId = Number(req.params.id);

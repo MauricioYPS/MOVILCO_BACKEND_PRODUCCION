@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
+import pool from "../config/database.js";
 
-export function authRequired(req, res, next) {
+export async function authRequired(req, res, next) {
   try {
     const header = req.headers.authorization;
     if (!header)
@@ -10,9 +11,39 @@ export function authRequired(req, res, next) {
     if (!token)
       return res.status(401).json({ ok: false, error: "Token inválido" });
 
+    // 1. Verificar token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Guardamos los datos del usuario en req.user
+    // 2. Validar usuario en BD (estado activo)
+    const { rows } = await pool.query(
+      `
+      SELECT id, active
+      FROM core.users
+      WHERE id = $1
+      LIMIT 1
+      `,
+      [decoded.id]
+    );
+
+    const user = rows[0];
+
+    if (!user) {
+      return res.status(401).json({
+        ok: false,
+        error: "Usuario no existe"
+      });
+    }
+
+    if (user.active === false) {
+      return res.status(403).json({
+        ok: false,
+        code: "USER_INACTIVE",
+        error:
+          "Tu cuenta está inactiva. El acceso a la plataforma ha sido restringido. Comunícate con Recursos Humanos."
+      });
+    }
+
+    // 3. Usuario válido → pasar datos al request
     req.user = decoded;
 
     next();
