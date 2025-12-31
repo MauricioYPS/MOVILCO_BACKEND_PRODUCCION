@@ -6,29 +6,33 @@ function normalizeSql(col) {
   return `upper(trim(coalesce(${col}, '')))`;
 }
 
-export async function listRegions({ source = "nomina" } = {}) {
-  if (source === "users") {
+export async function listRegions({ source = "coordinators" } = {}) {
+  // Fuente más estable: core.users (coordinadores)
+  if (source === "coordinators" || source === "users") {
     const { rows } = await pool.query(`
       SELECT ${normalizeSql("u.regional")} AS value
       FROM core.users u
       WHERE u.regional IS NOT NULL AND trim(u.regional) <> ''
+        AND (u.role = 'COORDINACION' OR u.jerarquia = 'COORDINACION')
+        AND u.active = true
       GROUP BY 1
       ORDER BY 1
     `);
-    return rows.map(r => r.value).filter(Boolean);
+    return rows.map((r) => r.value).filter(Boolean);
   }
 
-  // nomina
+  // Si sí quieres "nomina", entonces aquí DEBE ser la columna regional (no distrito)
   const { rows } = await pool.query(`
-    SELECT ${normalizeSql("n.distrito")} AS value
+    SELECT ${normalizeSql("n.regional")} AS value
     FROM staging.archivo_nomina n
-    WHERE n.distrito IS NOT NULL AND trim(n.distrito) <> ''
+    WHERE n.regional IS NOT NULL AND trim(n.regional) <> ''
       AND upper(coalesce(n.contratado,'')) = 'SI'
     GROUP BY 1
     ORDER BY 1
   `);
-  return rows.map(r => r.value).filter(Boolean);
+  return rows.map((r) => r.value).filter(Boolean);
 }
+
 
 export async function listDistricts({ source = "nomina" } = {}) {
   if (source === "users") {
@@ -82,6 +86,7 @@ export async function listCoordinators({ activeOnly = true } = {}) {
     `
     SELECT
       u.id,
+      u.org_unit_id,
       u.document_id,
       u.name,
       u.email,
@@ -97,3 +102,4 @@ export async function listCoordinators({ activeOnly = true } = {}) {
   );
   return rows;
 }
+

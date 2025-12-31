@@ -236,6 +236,36 @@ export async function listUsers({ orgUnitIds = null, includeInactive = false } =
 
 
 
+export async function getCoordinatorById(id) {
+  const { rows } = await pool.query(
+    `
+    SELECT
+      u.id,
+      u.org_unit_id,
+      u.role,
+      u.jerarquia,
+      u.active,
+      u.regional,
+      u.district,
+      u.district_claro
+    FROM core.users u
+    WHERE u.id = $1
+    LIMIT 1
+    `,
+    [id]
+  );
+
+  const coord = rows[0] || null;
+  if (!coord) return null;
+
+  const role = String(coord.role || "").toUpperCase();
+  const jer = String(coord.jerarquia || "").toUpperCase();
+  coord._isCoordinator = role === "COORDINACION" || jer === "COORDINACION";
+
+  return coord;
+}
+
+
 /* ============================================================
     OBTENER UN USUARIO POR ID
    ============================================================ */

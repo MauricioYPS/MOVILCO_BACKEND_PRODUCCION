@@ -8,7 +8,7 @@ import {
 
 export async function regions(req, res) {
   try {
-    const source = String(req.query.source || "nomina").toLowerCase();
+    const source = String(req.query.source || "coordinators").toLowerCase();
     const data = await listRegions({ source });
     res.json({ ok: true, source, total: data.length, items: data });
   } catch (e) {
@@ -16,6 +16,7 @@ export async function regions(req, res) {
     res.status(500).json({ ok: false, error: "Error listando regionales" });
   }
 }
+
 
 export async function districts(req, res) {
   try {

@@ -27,6 +27,7 @@ import catalogRouter from './catalog.js'
 const router = Router()
 
 router.use('/auth',authRouter)
+// router.use(authRequired) // Protección de rutas siguientes
 router.use('/org',unitsRouter)
 router.use('/analytics',analyticsRouter)
 router.use('/users',usersRouter)

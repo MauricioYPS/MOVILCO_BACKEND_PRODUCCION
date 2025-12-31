@@ -25,7 +25,7 @@ router.post('/', create)
 router.put('/:id', update)
 router.delete('/:id', remove)
 
-router.get('/:id', getOne)
+router.get('/:id', authRequired, getOne)
 
 
 export default router

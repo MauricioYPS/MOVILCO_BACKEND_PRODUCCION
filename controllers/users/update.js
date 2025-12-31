@@ -3,10 +3,18 @@ import {
   VALID_ROLES,
   isValidRole,
   getUserById,
+  getCoordinatorById,
   orgUnitExists,
   emailInUse,
   updateUser
 } from "../../services/users.service.js";
+
+function isAsesoria({ role, jerarquia }) {
+  return (
+    String(role || "").toUpperCase() === "ASESORIA" ||
+    String(jerarquia || "").toUpperCase() === "ASESORIA"
+  );
+}
 
 export async function update(req, res) {
   try {
@@ -16,8 +24,7 @@ export async function update(req, res) {
     const current = await getUserById(id);
     if (!current) return res.status(404).json({ error: "Usuario no encontrado" });
 
-    // Merge seguro: si el body NO trae el campo, se conserva el actual.
-    // Si el body trae explícitamente null, se guardará null (eso es útil para "limpiar" campos).
+    // Merge seguro
     const payload = {
       org_unit_id: req.body?.org_unit_id ?? current.org_unit_id,
       document_id: req.body?.document_id ?? current.document_id,
@@ -30,11 +37,9 @@ export async function update(req, res) {
       role: req.body?.role ?? current.role,
       active: req.body?.active ?? current.active,
 
-      // IMPORTANTES (antes no estaban)
       district: req.body?.district ?? current.district,
       district_claro: req.body?.district_claro ?? current.district_claro,
 
-      // Opcionales adicionales (si los estás usando)
       regional: req.body?.regional ?? current.regional,
       cargo: req.body?.cargo ?? current.cargo,
       capacity: req.body?.capacity ?? current.capacity,
@@ -44,15 +49,11 @@ export async function update(req, res) {
       notes: req.body?.notes ?? current.notes
     };
 
-    if (Number.isNaN(Number(payload.org_unit_id))) {
-      return res.status(400).json({ error: "org_unit_id inválido" });
-    }
-    if (!(await orgUnitExists(payload.org_unit_id))) {
-      return res.status(400).json({ error: "La unidad organizacional no existe" });
-    }
+    // Validaciones base
     if (!payload.name || typeof payload.name !== "string" || payload.name.trim() === "") {
       return res.status(400).json({ error: "name inválido" });
     }
+
     if (!payload.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(payload.email))) {
       return res.status(400).json({ error: "email inválido" });
     }
@@ -66,10 +67,41 @@ export async function update(req, res) {
       return res.status(400).json({ error: `role debe ser uno de: ${VALID_ROLES.join(", ")}` });
     }
 
-    // Normalizaciones básicas
+    // Normalizaciones
     payload.name = payload.name.trim();
     payload.email = emailLower;
     payload.role = String(payload.role).toUpperCase();
+    payload.jerarquia = payload.jerarquia != null ? String(payload.jerarquia).toUpperCase() : payload.jerarquia;
+
+    // --- IMPOSICIÓN DE HERENCIA PARA ASESORIA ---
+    const asesoria = isAsesoria({ role: payload.role, jerarquia: payload.jerarquia });
+
+    if (asesoria) {
+      const coordIdNum = Number(payload.coordinator_id);
+      if (!coordIdNum || Number.isNaN(coordIdNum)) {
+        return res.status(400).json({ error: "coordinator_id es obligatorio para ASESORIA" });
+      }
+
+      const coord = await getCoordinatorById(coordIdNum);
+      if (!coord) return res.status(400).json({ error: "coordinator_id no existe" });
+      if (!coord._isCoordinator) return res.status(400).json({ error: "El usuario indicado no es COORDINACION" });
+      if (coord.active !== true) return res.status(400).json({ error: "El coordinador está inactivo" });
+
+      // Sobrescribir “heredados” sin importar lo que venga en body
+      payload.coordinator_id = coord.id;
+      payload.org_unit_id = coord.org_unit_id;
+      payload.regional = coord.regional ?? null;
+      payload.district = coord.district ?? null;
+      payload.district_claro = coord.district_claro ?? null;
+    }
+
+    // org_unit_id siempre debe ser válido (si asesoria ya viene del coordinador)
+    if (Number.isNaN(Number(payload.org_unit_id))) {
+      return res.status(400).json({ error: "org_unit_id inválido" });
+    }
+    if (!(await orgUnitExists(payload.org_unit_id))) {
+      return res.status(400).json({ error: "La unidad organizacional no existe" });
+    }
 
     const updated = await updateUser(id, payload);
     return res.json(updated);

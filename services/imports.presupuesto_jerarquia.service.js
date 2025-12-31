@@ -209,48 +209,40 @@ export async function importPresupuestoJerarquia(buffer) {
     await client.query("BEGIN");
 
     // OJO: Mantienes tu truncate de PJ
-    await client.query("TRUNCATE TABLE core.presupuesto_jerarquia RESTART IDENTITY");
+    await client.query("TRUNCATE TABLE staging.presupuesto_jerarquia");
 
     const insertCols = `
-      jerarquia_raw, cargo_raw, cedula, nombre_raw, contratado_raw,
-      distrito_raw, regional_raw, fecha_inicio, fecha_fin,
-      presupuesto_raw, ejecutado_raw, cierre_raw,
-      capacidad_raw, telefono_raw, correo_raw
-    `;
+  cedula, nivel, nombre, cargo, distrito, regional,
+  presupuesto, telefono, correo, capacidad
+`;
 
     const insertSQL = `
-      INSERT INTO core.presupuesto_jerarquia (${insertCols})
-      VALUES
-      ${rows.map((_, i) => {
-        const b = i * 15;
-        return `(
-          $${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5},
-          $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9},
-          $${b + 10}, $${b + 11}, $${b + 12},
-          $${b + 13}, $${b + 14}, $${b + 15}
-        )`;
-      }).join(", ")}
-    `;
+  INSERT INTO staging.presupuesto_jerarquia (${insertCols})
+  VALUES
+  ${rows.map((_, i) => {
+      const b = i * 10;
+      return `(
+      $${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5},
+      $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}
+    )`;
+    }).join(", ")}
+`;
 
     const values = rows.flatMap(r => [
-      r.jerarquia_raw,
-      r.cargo_raw,
       r.cedula,
+      r.jerarquia_raw,
       r.nombre_raw,
-      r.contratado_raw,
+      r.cargo_raw,
       r.distrito_raw,
       r.regional_raw,
-      r.fecha_inicio,
-      r.fecha_fin,
       r.presupuesto_raw,
-      r.ejecutado_raw,
-      r.cierre_raw,
-      r.capacidad_raw,
       r.telefono_raw,
       r.correo_raw,
+      r.capacidad_raw,
     ]);
 
     if (rows.length > 0) await client.query(insertSQL, values);
+
 
     // ============================================================
     // ✅ REGLA NEGOCIO (tuya):
@@ -260,7 +252,7 @@ export async function importPresupuestoJerarquia(buffer) {
     const { rowCount: reactivated } = await client.query(`
       UPDATE core.users u
       SET active = true, updated_at = now()
-      FROM core.presupuesto_jerarquia pj
+      FROM staging.presupuesto_jerarquia pj
       WHERE pj.cedula = u.document_id
         AND u.active IS DISTINCT FROM true
     `);
