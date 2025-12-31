@@ -49,7 +49,9 @@ export async function getMonthlyNominaPreview({ period, q = null, limit = 200, o
     siapp_unknown AS (
       SELECT fs.idasesor::text AS cedula, MAX(fs.nombreasesor) AS nombre
       FROM siapp.full_sales fs
-      LEFT JOIN core.users u ON u.document_id = fs.idasesor
+LEFT JOIN core.users u
+  ON regexp_replace(u.document_id::text, '\D', '', 'g')
+   = regexp_replace(fs.idasesor::text, '\D', '', 'g')
       WHERE fs.period_year=$1 AND fs.period_month=$2
         AND fs.idasesor IS NOT NULL
         AND u.id IS NULL

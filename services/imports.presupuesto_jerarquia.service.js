@@ -1,15 +1,17 @@
+// services/imports.presupuesto_jerarquia.service.js
 import ExcelJS from "exceljs";
 import pool from "../config/database.js";
 
-const SHEET_NAME = "Presupuesto Jerarquia"; // nombre exacto
+const SHEET_NAME = "Presupuesto Jerarquia"; // nombre exacto de la hoja
 
-// -------------------------------
-// HELPERS
-// -------------------------------
+// =====================================================
+// Utils
+// =====================================================
 function normalize(v) {
   if (v == null) return "";
   return String(v)
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -17,12 +19,41 @@ function normalizeUpper(v) {
   return normalize(v).toUpperCase();
 }
 
+function cellToText(v) {
+  if (v == null) return "";
+  if (typeof v === "object") {
+    if (Array.isArray(v.richText)) return v.richText.map(t => t.text || "").join("");
+    if (typeof v.text === "string") return v.text;
+    if (v.result != null) return String(v.result);
+  }
+  return String(v);
+}
+
+/**
+ * Junta textos del encabezado para una misma columna en N filas (span)
+ * Sirve cuando Excel trae encabezados “combinados” en 2-3 filas.
+ */
+function collectHeaderTexts(ws, headerRow, span = 3) {
+  const maxCol = ws.columnCount || (ws.getRow(headerRow)?.values?.length ?? 0);
+  const out = Array(maxCol + 1).fill("");
+
+  for (let c = 1; c <= maxCol; c++) {
+    const parts = [];
+    for (let r = headerRow; r < headerRow + span && r <= ws.rowCount; r++) {
+      const v = ws.getRow(r)?.getCell(c)?.value;
+      const t = normalizeUpper(cellToText(v));
+      if (t) parts.push(t);
+    }
+    out[c] = parts.join(" ").replace(/\s+/g, " ").trim();
+  }
+
+  return out;
+}
+
 function toDate(v) {
   if (!v) return null;
 
-  if (v instanceof Date) {
-    return v.toISOString().slice(0, 10);
-  }
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
 
   if (typeof v === "number") {
     const epoch = new Date(Date.UTC(1899, 11, 30));
@@ -47,33 +78,34 @@ function toNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// -------------------------------
-// DETECTAR FILA DE ENCABEZADOS
-// -------------------------------
-function findHeaderRow(ws) {
-  for (let r = 1; r <= 20; r++) {
-    const row = ws.getRow(r);
-    const vals = row.values.map(v => normalizeUpper(v));
+function rowHasAnyValue(rec) {
+  return Object.values(rec).some(v => v !== null && v !== "");
+}
 
-    if (vals.includes("CEDULA") && vals.some(t => t.includes("NOMBRE"))) {
-      return r;
-    }
+// =====================================================
+// Detectar fila de encabezados
+// =====================================================
+function findHeaderRow(ws) {
+  for (let r = 1; r <= 30; r++) {
+    const row = ws.getRow(r);
+    const vals = (row.values || []).map(v => normalizeUpper(cellToText(v)));
+    const hasCedula = vals.some(t => t.includes("CEDULA"));
+    const hasNombre = vals.some(t => t.includes("NOMBRE"));
+    if (hasCedula && hasNombre) return r;
   }
   return null;
 }
 
-// -------------------------------
-// MAPEAR COLUMNAS
-// -------------------------------
+// =====================================================
+// Mapeo columnas (robusto multi-fila)
+// =====================================================
 function buildColumnIndex(ws, headerRow) {
-  const row = ws.getRow(headerRow);
-  const cols = row.values.map(v => (v ? normalize(v) : ""));
+  const headers = collectHeaderTexts(ws, headerRow, 3);
 
   const findAny = (keywords) => {
-    const norms = keywords.map(k => normalize(k));
-
-    for (let c = 1; c < cols.length; c++) {
-      const text = cols[c];
+    const norms = keywords.map(k => normalizeUpper(k));
+    for (let c = 1; c < headers.length; c++) {
+      const text = headers[c];
       if (!text) continue;
       for (const k of norms) {
         if (text.includes(k)) return c;
@@ -82,16 +114,17 @@ function buildColumnIndex(ws, headerRow) {
     return -1;
   };
 
+  // Importante: agregamos variantes posibles de “CONTRATADO”
   const wanted = {
     jerarquia: ["JERARQUIA"],
     cargo: ["CARGO"],
     cedula: ["CEDULA", "DOCUMENTO", "CC"],
     nombre: ["NOMBRE", "FUNCIONARIO"],
+    contratado: ["CONTRATADO", "CONTRATA DO", "ESTADO", "VIGENTE", "ACTIVO", "RETIRADO"],
     distrito: ["DISTRITO"],
     regional: ["REGIONAL"],
     fecha_inicio: ["FECHA INICIO"],
     fecha_fin: ["FECHA FIN"],
-    contrato: ["CONTRATADO"],   // ← AGREGADO
     presupuesto: ["PRESUPUESTO"],
     ejecutado: ["EJECUTADO"],
     cierre: ["CIERRE"],
@@ -100,17 +133,16 @@ function buildColumnIndex(ws, headerRow) {
     correo: ["CORREO", "EMAIL"]
   };
 
-
   return {
     jerarquia: findAny(wanted.jerarquia),
     cargo: findAny(wanted.cargo),
     cedula: findAny(wanted.cedula),
     nombre: findAny(wanted.nombre),
+    contratado: findAny(wanted.contratado),
     distrito: findAny(wanted.distrito),
     regional: findAny(wanted.regional),
     fecha_inicio: findAny(wanted.fecha_inicio),
     fecha_fin: findAny(wanted.fecha_fin),
-    contratado: findAny(wanted.contrato),   // ← AGREGADO
     presupuesto: findAny(wanted.presupuesto),
     ejecutado: findAny(wanted.ejecutado),
     cierre: findAny(wanted.cierre),
@@ -120,13 +152,9 @@ function buildColumnIndex(ws, headerRow) {
   };
 }
 
-function rowHasAnyValue(rec) {
-  return Object.values(rec).some(v => v !== null && v !== "");
-}
-
-// ======================================================
+// =====================================================
 // IMPORTADOR PRINCIPAL
-// ======================================================
+// =====================================================
 export async function importPresupuestoJerarquia(buffer) {
   console.log("[IMPORT PJ] Cargando Excel...");
 
@@ -141,8 +169,12 @@ export async function importPresupuestoJerarquia(buffer) {
 
   const idx = buildColumnIndex(ws, headerRow);
 
-  const rows = [];
+  // Cedula y nombre deben existir
+  if (idx.cedula < 0 || idx.nombre < 0) {
+    throw new Error("Encabezados insuficientes: no se encontró CEDULA y/o NOMBRE");
+  }
 
+  const rows = [];
   for (let r = headerRow + 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
 
@@ -151,7 +183,10 @@ export async function importPresupuestoJerarquia(buffer) {
       cargo_raw: idx.cargo > 0 ? normalize(row.getCell(idx.cargo).value) : null,
       cedula: idx.cedula > 0 ? normalize(row.getCell(idx.cedula).value).replace(/\D/g, "") : null,
       nombre_raw: idx.nombre > 0 ? normalize(row.getCell(idx.nombre).value) : null,
+
+      // ✅ FIX: contratado_raw ahora sí se llena si existe en el Excel
       contratado_raw: idx.contratado > 0 ? normalize(row.getCell(idx.contratado).value) : null,
+
       distrito_raw: idx.distrito > 0 ? normalize(row.getCell(idx.distrito).value) : null,
       regional_raw: idx.regional > 0 ? normalize(row.getCell(idx.regional).value) : null,
       fecha_inicio: idx.fecha_inicio > 0 ? toDate(row.getCell(idx.fecha_inicio).value) : null,
@@ -162,7 +197,6 @@ export async function importPresupuestoJerarquia(buffer) {
       capacidad_raw: idx.capacidad > 0 ? toNumber(row.getCell(idx.capacidad).value) : null,
       telefono_raw: idx.telefono > 0 ? normalize(row.getCell(idx.telefono).value) : null,
       correo_raw: idx.correo > 0 ? normalize(row.getCell(idx.correo).value) : null,
-
     };
 
     if (rowHasAnyValue(rec)) rows.push(rec);
@@ -174,27 +208,29 @@ export async function importPresupuestoJerarquia(buffer) {
   try {
     await client.query("BEGIN");
 
+    // OJO: Mantienes tu truncate de PJ
     await client.query("TRUNCATE TABLE core.presupuesto_jerarquia RESTART IDENTITY");
 
     const insertCols = `
-  jerarquia_raw, cargo_raw, cedula, nombre_raw, contratado_raw, distrito_raw, regional_raw,
-  fecha_inicio, fecha_fin, presupuesto_raw, ejecutado_raw, cierre_raw,
-  capacidad_raw, telefono_raw, correo_raw
-`;
+      jerarquia_raw, cargo_raw, cedula, nombre_raw, contratado_raw,
+      distrito_raw, regional_raw, fecha_inicio, fecha_fin,
+      presupuesto_raw, ejecutado_raw, cierre_raw,
+      capacidad_raw, telefono_raw, correo_raw
+    `;
 
     const insertSQL = `
-  INSERT INTO core.presupuesto_jerarquia
-  (${insertCols})
-  VALUES
-  ${rows.map((_, i) => {
-      const b = i * 15;
-      return `(
-      $${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5},
-      $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10},
-      $${b + 11}, $${b + 12}, $${b + 13}, $${b + 14}, $${b + 15}
-    )`;
-    }).join(", ")}
-`;
+      INSERT INTO core.presupuesto_jerarquia (${insertCols})
+      VALUES
+      ${rows.map((_, i) => {
+        const b = i * 15;
+        return `(
+          $${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5},
+          $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9},
+          $${b + 10}, $${b + 11}, $${b + 12},
+          $${b + 13}, $${b + 14}, $${b + 15}
+        )`;
+      }).join(", ")}
+    `;
 
     const values = rows.flatMap(r => [
       r.jerarquia_raw,
@@ -214,13 +250,25 @@ export async function importPresupuestoJerarquia(buffer) {
       r.correo_raw,
     ]);
 
-
     if (rows.length > 0) await client.query(insertSQL, values);
 
-    await client.query("COMMIT");
-    console.log("[IMPORT PJ] Importación finalizada OK");
+    // ============================================================
+    // ✅ REGLA NEGOCIO (tuya):
+    // “Se importa una vez y todos quedan activos”.
+    // Reactiva todos los usuarios que vienen en PJ.
+    // ============================================================
+    const { rowCount: reactivated } = await client.query(`
+      UPDATE core.users u
+      SET active = true, updated_at = now()
+      FROM core.presupuesto_jerarquia pj
+      WHERE pj.cedula = u.document_id
+        AND u.active IS DISTINCT FROM true
+    `);
 
-    return { ok: true, inserted: rows.length };
+    await client.query("COMMIT");
+
+    console.log("[IMPORT PJ] Importación finalizada OK");
+    return { inserted: rows.length, users_reactivated: reactivated };
 
   } catch (err) {
     await client.query("ROLLBACK");

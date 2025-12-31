@@ -3,9 +3,6 @@ import { importPresupuestoJerarquia } from "../../services/imports.presupuesto_j
 
 export async function importPresupuestoJerarquiaController(req, res) {
   try {
-    // ------------------------------
-    // 1. Validar archivo recibido
-    // ------------------------------
     if (!req.file) {
       return res.status(400).json({
         ok: false,
@@ -18,19 +15,12 @@ export async function importPresupuestoJerarquiaController(req, res) {
       size: req.file.size
     });
 
-    // ------------------------------
-    // 2. Ejecutar importador
-    // ------------------------------
     const result = await importPresupuestoJerarquia(req.file.buffer);
 
-    // ------------------------------
-    // 3. Responder al cliente
-    // ------------------------------
     return res.json({
       ok: true,
       ...result
     });
-
   } catch (error) {
     console.error("[IMPORT PJ] Error al importar Presupuesto Jerarquía:", error);
 

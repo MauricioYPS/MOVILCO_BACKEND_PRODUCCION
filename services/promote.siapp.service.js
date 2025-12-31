@@ -1,6 +1,6 @@
 // services/promote.siapp.service.js
-import pool from '../config/database.js'
-import { loadSettings } from './settings.service.js'
+import pool from "../config/database.js";
+import { loadSettings } from "./settings.service.js";
 
 /**
  * promoteSiappFromFullSales
@@ -8,41 +8,55 @@ import { loadSettings } from './settings.service.js'
  * usando el SIAPP FULL (siapp.full_sales)
  * y guarda resultados en core.progress.
  *
- * REGLA:
+ * REGLA (CORREGIDA):
  *  - Match SIEMPRE por IDASESOR (fs.idasesor <-> core.users.document_id)
  *  - NO usar cedula_vendedor para nada de matching.
- *  - cantserv es VARCHAR => parse seguro a número.
+ *  - KPI vs metas (expected/adjusted) se mide por FILAS (1 fila = 1 conexión/venta).
+ *  - cantserv se conserva solo como analítica, NO para metas.
  */
 export async function promoteSiappFromFullSales({ period_year, period_month }) {
-  const client = await pool.connect()
+  const client = await pool.connect();
 
   // Parse robusto de cantserv (VARCHAR)
   const parseCantServ = (v) => {
-    if (v === null || v === undefined) return 0
-    const s = String(v).trim()
-    if (!s) return 0
+    if (v === null || v === undefined) return 0;
+    const s = String(v).trim();
+    if (!s) return 0;
 
     // Normaliza coma decimal
-    const normalized = s.replace(',', '.')
-    const n = Number(normalized)
-    if (Number.isFinite(n)) return n
+    const normalized = s.replace(",", ".");
+    const n = Number(normalized);
+    if (Number.isFinite(n)) return n;
 
     // Fallback: extraer primer número del string
-    const m = normalized.match(/-?\d+(\.\d+)?/)
-    return m ? Number(m[0]) : 0
-  }
+    const m = normalized.match(/-?\d+(\.\d+)?/);
+    return m ? Number(m[0]) : 0;
+  };
 
   // Normaliza keys (IDASESOR y document_id)
-  const normId = (x) => (x === null || x === undefined ? '' : String(x).trim())
+  const normId = (x) => {
+    if (x === null || x === undefined) return "";
+    return String(x).trim().replace(/\D+/g, "");
+  };
+
+  // Parse numérico robusto para settings (KV string)
+  const toNumber = (v, fallback = 0) => {
+    if (v === null || v === undefined) return fallback;
+    const n = Number(String(v).trim().replace(",", "."));
+    return Number.isFinite(n) ? n : fallback;
+  };
 
   try {
-    await client.query('BEGIN')
+    await client.query("BEGIN");
 
-    // 1. Leer configuración global
-    const settings = await loadSettings(client)
+    // 1. Leer configuración global (NO tocamos tu forma actual)
+    const settings = await loadSettings(client);
+
+    // Opción 1: usar compliance_threshold_percent como umbral
+    // default 100 si no existe
+    const threshold = toNumber(settings?.compliance_threshold_percent, 100);
 
     // 2. Obtener ventas reales desde siapp.full_sales
-    // IMPORTANT: columnas reales en tu tabla -> idasesor, nombreasesor
     const { rows: sales } = await client.query(
       `
       SELECT
@@ -56,22 +70,22 @@ export async function promoteSiappFromFullSales({ period_year, period_month }) {
         AND fs.idasesor IS NOT NULL
       `,
       [period_year, period_month]
-    )
+    );
 
     // Agrupar por asesor (IDASESOR)
-    const asesores = {}
+    const asesores = {};
     for (const s of sales) {
-      const key = normId(s.id_asesor)
-      if (!key) continue
+      const key = normId(s.id_asesor);
+      if (!key) continue;
 
       if (!asesores[key]) {
         asesores[key] = {
           id_asesor: key,
           nombre_asesor: s.nombre_asesor || null,
-          ventas: [],
-        }
+          ventas: []
+        };
       }
-      asesores[key].ventas.push(s)
+      asesores[key].ventas.push(s);
     }
 
     // 3. Obtener usuarios reales (match por document_id = IDASESOR)
@@ -81,44 +95,55 @@ export async function promoteSiappFromFullSales({ period_year, period_month }) {
       FROM core.users
       WHERE document_id IS NOT NULL
       `
-    )
+    );
 
-    const userMap = {}
+    const userMap = {};
     for (const u of users) {
-      const key = normId(u.id_asesor)
-      if (!key) continue
-      userMap[key] = u
+      const key = normId(u.id_asesor);
+      if (!key) continue;
+      userMap[key] = u;
     }
 
     // 4. Procesar cada asesor y hacer UPSERT en core.progress
-    let upserted = 0
-    let matchedUsers = 0
+    let upserted = 0;
+    let matchedUsers = 0;
 
     for (const asesor_id of Object.keys(asesores)) {
-      const data = asesores[asesor_id]
-      const u = userMap[asesor_id]
+      const data = asesores[asesor_id];
+      const u = userMap[asesor_id];
 
-      if (!u) continue // asesor no existe en usuarios (fuera nómina/presupuesto)
+      if (!u) continue; // asesor no existe en usuarios (fuera nómina/presupuesto)
+      matchedUsers++;
 
-      matchedUsers++
+      const ventas = data.ventas;
 
-      const ventas = data.ventas
+      // 4.1 Calcular IN / OUT (KPI POR FILAS)
+      let real_in = 0;
+      let real_out = 0;
 
-      // 4.1 Calcular IN / OUT
-      let real_in = 0
-      let real_out = 0
+      // Analítica (NO afecta KPI): suma cantserv por si te sirve
+      // (no lo guardamos en core.progress, solo queda disponible para debug)
+      let cantserv_in = 0;
+      let cantserv_out = 0;
 
-      const d_user = (u.district_claro || u.district || '').trim().toUpperCase()
+      const d_user = (u.district_claro || u.district || "").trim().toUpperCase();
 
       for (const v of ventas) {
-        const d_venta = (v.distrito_venta || '').trim().toUpperCase()
-        const c = parseCantServ(v.cantserv)
+        const d_venta = (v.distrito_venta || "").trim().toUpperCase();
+        const c = parseCantServ(v.cantserv);
 
-        if (d_user && d_venta && d_venta === d_user) real_in += c
-        else real_out += c
+        const isIn = d_user && d_venta && d_venta === d_user;
+
+        // KPI por filas (1 venta = 1)
+        if (isIn) real_in += 1;
+        else real_out += 1;
+
+        // Analítica cantserv
+        if (isIn) cantserv_in += c;
+        else cantserv_out += c;
       }
 
-      const real_total = real_in + real_out
+      const real_total = real_in + real_out;
 
       // 4.2 Tomar información mensual desde user_monthly (si existe)
       const { rows: umRows } = await client.query(
@@ -131,24 +156,28 @@ export async function promoteSiappFromFullSales({ period_year, period_month }) {
         LIMIT 1
         `,
         [u.id, period_year, period_month]
-      )
+      );
 
-      let expected = 0
-      let adjusted = 0
+      let expected = 0;
+      let adjusted = 0;
+
       if (umRows.length > 0) {
-        expected = Number(umRows[0].presupuesto_mes || 0)
-        adjusted = Number(umRows[0].prorrateo || expected)
+        expected = Number(umRows[0].presupuesto_mes || 0);
+        // prorrateo puede ser null; si es null, usamos expected
+        adjusted = Number(umRows[0].prorrateo ?? expected);
       }
 
-      // 4.3 Calcular cumplimiento
+      // 4.3 Calcular cumplimiento (POR FILAS)
       const compliance_in =
-        adjusted > 0 ? Number(((real_in / adjusted) * 100).toFixed(2)) : 0
+        adjusted > 0 ? Number(((real_in / adjusted) * 100).toFixed(2)) : 0;
 
       const compliance_global =
-        expected > 0 ? Number(((real_total / expected) * 100).toFixed(2)) : 0
+        expected > 0 ? Number(((real_total / expected) * 100).toFixed(2)) : 0;
 
-      const met_in = compliance_in >= Number(settings.min_compliance_in || 0)
-      const met_global = compliance_global >= Number(settings.min_compliance_global || 0)
+      // 4.3.1 Flags (Opción 1)
+      // met_in y met_global SOLO si hay base (>0) y supera threshold
+      const met_in = adjusted > 0 && compliance_in >= threshold;
+      const met_global = expected > 0 && compliance_global >= threshold;
 
       // 4.4 Insertar / actualizar progress
       await client.query(
@@ -194,29 +223,33 @@ export async function promoteSiappFromFullSales({ period_year, period_month }) {
           compliance_in,
           compliance_global,
           met_in,
-          met_global,
+          met_global
         ]
-      )
+      );
 
-      upserted++
+      upserted++;
+
+      // Si algún día quieres guardar cantserv en otra tabla o log:
+      // console.log({ asesor_id, period_year, period_month, cantserv_in, cantserv_out });
     }
 
-    await client.query('COMMIT')
+    await client.query("COMMIT");
 
     return {
       ok: true,
       period_year,
       period_month,
+      threshold_percent: threshold,
       total_sales_rows: sales.length,
       total_asesores_en_siapp: Object.keys(asesores).length,
       matched_users: matchedUsers,
       upserted
-    }
+    };
   } catch (e) {
-    await client.query('ROLLBACK')
-    console.error('[PROMOTE_SIAPP_PROGRESS]', e)
-    throw e
+    await client.query("ROLLBACK");
+    console.error("[PROMOTE_SIAPP_PROGRESS]", e);
+    throw e;
   } finally {
-    client.release()
+    client.release();
   }
 }
