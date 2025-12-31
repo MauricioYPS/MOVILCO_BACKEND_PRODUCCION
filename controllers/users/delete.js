@@ -1,4 +1,5 @@
-import { getUserById, deleteUser } from '../../services/users.service.js'
+// controllers/users/delete.js
+import { getUserById, deactivateUser } from '../../services/users.service.js'
 
 export async function remove(req, res) {
   try {
@@ -8,10 +9,13 @@ export async function remove(req, res) {
     const current = await getUserById(id)
     if (!current) return res.status(404).json({ error: 'Usuario no encontrado' })
 
-    await deleteUser(id)
-    res.status(204).send()
+    // Soft delete: desactiva (no borra)
+    await deactivateUser(id)
+
+    // 204 para mantener compatibilidad con tu front/Postman
+    return res.status(204).send()
   } catch (e) {
     console.error('[DELETE /users/:id] error:', e)
-    res.status(500).json({ error: 'Error al eliminar usuario' })
+    return res.status(500).json({ error: 'Error al desactivar usuario' })
   }
 }

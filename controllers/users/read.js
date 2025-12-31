@@ -17,8 +17,9 @@ export async function list(req, res) {
         .filter(n => !Number.isNaN(n));
       if (ids.length) filter.orgUnitIds = ids;
     }
-
-    const rows = await listUsers(filter);
+const includeInactive =
+  String(req.query.include_inactive || '').toLowerCase() === 'true';
+    const rows = await listUsers({ ...filter, includeInactive });
     res.json(rows);
 
   } catch (e) {

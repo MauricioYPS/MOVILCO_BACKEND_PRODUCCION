@@ -3,7 +3,15 @@ import { getMonthlySalesDetail } from "../../services/siapp.monthly-sales.servic
 
 export async function getMonthlySales(req, res) {
   try {
-    const { period, limit, offset, q, advisor_id, only_in, district_mode } = req.query;
+    const {
+      period,
+      limit,
+      offset,
+      q,
+      advisor_id,
+      only_in,
+      district_mode
+    } = req.query;
 
     const result = await getMonthlySalesDetail({
       period,
@@ -12,15 +20,26 @@ export async function getMonthlySales(req, res) {
       q,
       advisor_id,
       only_in,
-      district_mode: district_mode || "auto"
+      district_mode: (district_mode ? String(district_mode).trim() : "auto")
     });
 
-    return res.json({ ok: true, ...result });
+    // El service ya retorna ok:true; no lo dupliquemos
+    return res.json(result);
   } catch (error) {
     console.error("[MONTHLY SALES ERROR]", error);
-    return res.status(400).json({
+
+    // Si es error de validación de input (period, etc.), lo tratamos como 400
+    const msg = String(error?.message || "");
+    const isBadRequest =
+      msg.includes("Falta o es inválido ?period=YYYY-MM") ||
+      msg.includes("Formato") ||
+      msg.includes("inválido") ||
+      msg.includes("invalid") ||
+      msg.includes("Use YYYY-MM");
+
+    return res.status(isBadRequest ? 400 : 500).json({
       ok: false,
-      error: error.message || "Error al consultar ventas del mes"
+      error: msg || "Error al consultar ventas del mes"
     });
   }
 }

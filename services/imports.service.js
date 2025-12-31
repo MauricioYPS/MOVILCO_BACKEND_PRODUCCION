@@ -31,20 +31,39 @@ function normalize(s) {
 }
 
 function toDate(v) {
-  if (v == null || v === '') return null
-  if (v instanceof Date) return v.toISOString().slice(0, 10)
-  if (typeof v === 'number') {
-    const epoch = new Date(Date.UTC(1899, 11, 30))
-    const d = new Date(epoch.getTime() + v * 86400000)
-    return d.toISOString().slice(0, 10)
+  if (v == null || v === '') return null;
+
+  // 1) Si viene como objeto ExcelJS (formula/result/richText), convertir a texto
+  //    Nota: cellToText ya lo tienes definido arriba.
+  if (typeof v === 'object' && !(v instanceof Date)) {
+    // Si es objeto con result/text/richText, lo convertimos
+    const asText = cellToText(v);
+    // Si cellToText devuelve algo usable, seguimos como string
+    if (asText != null && asText !== '') v = asText;
   }
-  const t = normalize(v)
-  let m = t.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/)
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`
-  m = t.match(/^(\d{4})[\/\-](\d{2})[\/\-](\d{2})$/)
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`
-  return null
+
+  // 2) Date nativo
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+
+  // 3) Serial de Excel (número)
+  if (typeof v === 'number') {
+    const epoch = new Date(Date.UTC(1899, 11, 30));
+    const d = new Date(epoch.getTime() + v * 86400000);
+    return d.toISOString().slice(0, 10);
+  }
+
+  // 4) String (dd/mm/yyyy o yyyy-mm-dd)
+  const t = normalize(v);
+
+  let m = t.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+
+  m = t.match(/^(\d{4})[\/\-](\d{2})[\/\-](\d{2})$/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+
+  return null;
 }
+
 
 function toNumber(v) {
   if (v == null || v === '') return null
@@ -169,32 +188,53 @@ async function parseNomina(filePath) {
   ]
   const table = DATASET_TABLE.nomina
 
+  // Helpers: texto seguro para celdas ExcelJS (string/Date/number/object)
+  const getCellValue = (row, colIdx) => (colIdx > 0 ? row.getCell(colIdx).value : null)
+
+  const getText = (row, colIdx) => {
+    const v = getCellValue(row, colIdx)
+    const t = String(cellToText(v) ?? '').trim()
+    return t === '' ? null : t
+  }
+
+  const getNorm = (row, colIdx) => {
+    const v = getCellValue(row, colIdx)
+    const t = normalize(cellToText(v) ?? '')
+    return t === '' ? null : t
+  }
+
+  const getCedula = (row, colIdx) => {
+    const v = getCellValue(row, colIdx)
+    const t = normalize(cellToText(v) ?? '').replace(/\D/g, '')
+    return t === '' ? null : t
+  }
+
   const rows = []
   for (let r = headerRow + 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r)
     const rawArr = (row.values || []).slice(1)
     if (rowIsEmpty(rawArr)) continue
 
-    const cedRaw = idx.cedula > 0 ? row.getCell(idx.cedula).value : null
-    const cedula = normalize(cedRaw).replace(/\D/g, '') || null
+    const cedula = getCedula(row, idx.cedula)
 
     rows.push([
       cedula,
-      idx.nombre > 0 ? String(row.getCell(idx.nombre).value ?? '').trim() : null,
-      idx.contratado > 0 ? normalize(row.getCell(idx.contratado).value) : null,
-      idx.distrito > 0 ? String(row.getCell(idx.distrito).value ?? '').trim() : null,
-      idx.distrito_claro > 0 ? String(row.getCell(idx.distrito_claro).value ?? '').trim() : null,
-      idx.fecha_inicio > 0 ? toDate(row.getCell(idx.fecha_inicio).value) : null,
-      idx.fecha_fin > 0 ? toDate(row.getCell(idx.fecha_fin).value) : null,
-      idx.novedad > 0 ? String(row.getCell(idx.novedad).value ?? '').trim() : null,
-      idx.presupuesto_mes > 0 ? toNumber(row.getCell(idx.presupuesto_mes).value) : null,
-      idx.dias_laborados > 0 ? toNumber(row.getCell(idx.dias_laborados).value) : null,
-      idx.estado_envio > 0 ? String(row.getCell(idx.estado_envio).value ?? '').trim() : null,
+      getText(row, idx.nombre),
+      getNorm(row, idx.contratado),
+      getText(row, idx.distrito),
+      getText(row, idx.distrito_claro),
+      idx.fecha_inicio > 0 ? toDate(getCellValue(row, idx.fecha_inicio)) : null,
+      idx.fecha_fin > 0 ? toDate(getCellValue(row, idx.fecha_fin)) : null,
+      getText(row, idx.novedad),
+      idx.presupuesto_mes > 0 ? toNumber(getCellValue(row, idx.presupuesto_mes)) : null,
+      idx.dias_laborados > 0 ? toNumber(getCellValue(row, idx.dias_laborados)) : null,
+      getText(row, idx.estado_envio),
     ])
   }
 
-  return { table: DATASET_TABLE.nomina, columns, rows }
+  return { table, columns, rows }
 }
+
 
 // ----------------- Parsers simples -----------------
 async function parseSimpleFirstRow(filePath, sheetName, table, colMap) {

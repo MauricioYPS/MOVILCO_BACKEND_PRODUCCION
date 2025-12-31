@@ -151,7 +151,7 @@ export async function upsertUser(client, data) {
 /* ============================================================
    LISTA DE USUARIOS
    ============================================================ */
-export async function listUsers({ orgUnitIds = null } = {}) {
+export async function listUsers({ orgUnitIds = null, includeInactive = false } = {}) {
   const baseQuery = `
     WITH org AS (
       SELECT 
@@ -194,13 +194,12 @@ export async function listUsers({ orgUnitIds = null } = {}) {
       LEFT JOIN core.org_units ou ON ou.id = u.org_unit_id
       LEFT JOIN core.org_units d  ON d.id = ou.parent_id
       LEFT JOIN core.org_units g  ON g.id = d.parent_id
+      ${includeInactive ? '' : 'WHERE u.active = true'}
     ),
 
     resolved_parent AS (
       SELECT 
         o.*,
-
-        -- Normalización del padre
         CASE 
           WHEN o.jerarquia = 'ASESORIA' THEN (
             SELECT id FROM core.users cu 
@@ -233,6 +232,7 @@ export async function listUsers({ orgUnitIds = null } = {}) {
   const { rows } = await pool.query(`${baseQuery} ORDER BY user_id ASC`);
   return rows;
 }
+
 
 
 
@@ -306,6 +306,10 @@ export async function emailInUse(email, ignoreId = null) {
 /* ============================================================
     CREATE USER (para auth, no importadores)
    ============================================================ */
+/* ============================================================
+    CREATE USER (para auth, no importadores)
+    Ahora guarda también district/district_claro y demás campos
+   ============================================================ */
 export async function createUser({
   org_unit_id,
   document_id,
@@ -315,7 +319,19 @@ export async function createUser({
   email,
   phone,
   role,
-  password_hash // aquí sí permitimos contraseña explícita
+  active = true,
+
+  district = null,
+  district_claro = null,
+  regional = null,
+  cargo = null,
+  capacity = null,
+  jerarquia = null,
+  contract_start = null,
+  contract_end = null,
+  notes = null,
+
+  password_hash = null // opcional
 }) {
   const { rows } = await pool.query(
     `
@@ -328,9 +344,19 @@ export async function createUser({
       email,
       phone,
       role,
+      active,
+      district,
+      district_claro,
+      regional,
+      cargo,
+      capacity,
+      jerarquia,
+      contract_start,
+      contract_end,
+      notes,
       password_hash
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
     RETURNING
       id,
       org_unit_id,
@@ -362,18 +388,30 @@ export async function createUser({
       document_id,
       advisor_id,
       coordinator_id,
-      name.trim(),
-      email.toLowerCase(),
+      name?.trim(),
+      String(email || "").toLowerCase(),
       phone ?? null,
-      String(role).toUpperCase(),
+      String(role || "").toUpperCase(),
+      !!active,
+      district,
+      district_claro,
+      regional,
+      cargo,
+      capacity,
+      jerarquia,
+      contract_start,
+      contract_end,
+      notes,
       password_hash
     ]
-  )
-  return rows[0]
+  );
+
+  return rows[0];
 }
 
 /* ============================================================
     UPDATE USER (no modifica contraseñas)
+    Ahora también permite actualizar district/district_claro, etc.
    ============================================================ */
 export async function updateUser(
   id,
@@ -386,7 +424,17 @@ export async function updateUser(
     email,
     phone,
     role,
-    active
+    active,
+
+    district = null,
+    district_claro = null,
+    regional = null,
+    cargo = null,
+    capacity = null,
+    jerarquia = null,
+    contract_start = null,
+    contract_end = null,
+    notes = null
   }
 ) {
   const { rows } = await pool.query(
@@ -401,8 +449,19 @@ export async function updateUser(
         phone = $7,
         role = $8,
         active = $9,
+
+        district = $10,
+        district_claro = $11,
+        regional = $12,
+        cargo = $13,
+        capacity = $14,
+        jerarquia = $15,
+        contract_start = $16,
+        contract_end = $17,
+        notes = $18,
+
         updated_at = now()
-    WHERE id = $10
+    WHERE id = $19
     RETURNING
       id,
       org_unit_id,
@@ -434,21 +493,50 @@ export async function updateUser(
       document_id,
       advisor_id,
       coordinator_id,
-      name.trim(),
-      email.toLowerCase(),
+      name?.trim(),
+      String(email || "").toLowerCase(),
       phone ?? null,
-      String(role).toUpperCase(),
+      String(role || "").toUpperCase(),
       !!active,
+
+      district,
+      district_claro,
+      regional,
+      cargo,
+      capacity,
+      jerarquia,
+      contract_start,
+      contract_end,
+      notes,
+
       id
     ]
-  )
-  return rows[0]
+  );
+
+  return rows[0];
 }
 
+
 /* ============================================================
-    DELETE USER
+    DELETE USER (solo para admin, borra físicamente)
    ============================================================ */
 export async function deleteUser(id) {
   await pool.query(`DELETE FROM core.users WHERE id = $1`, [id])
+  return true
+}
+/* ============================================================
+    SOFT DELETE USER (desactiva sin borrar)
+   ============================================================ */
+export async function deactivateUser(id) {
+  await pool.query(
+    `
+    UPDATE core.users
+    SET active = false,
+        coordinator_id = NULL,
+        updated_at = now()
+    WHERE id = $1
+    `,
+    [id]
+  )
   return true
 }

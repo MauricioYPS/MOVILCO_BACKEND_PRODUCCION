@@ -60,9 +60,12 @@ export async function getMonthlySalesDetail({
   const hasQ = q && String(q).trim().length > 0;
   const qLike = hasQ ? `%${String(q).trim().toUpperCase()}%` : null;
 
-  const advisor = advisor_id != null && String(advisor_id).trim() !== "" ? String(advisor_id).trim() : null;
-  const onlyInParsed = parseBool(only_in);
+  const advisor =
+    advisor_id != null && String(advisor_id).trim() !== ""
+      ? String(advisor_id).trim()
+      : null;
 
+  const onlyInParsed = parseBool(only_in);
   const mode = String(district_mode || "auto").toLowerCase();
 
   // Campo de distrito usuario según modo
@@ -102,6 +105,7 @@ export async function getMonthlySalesDetail({
 
   // -------------------------------------------------------------------
   // 2) DATA (page)
+  //    Nota: ya NO depende de core.user_monthly
   // -------------------------------------------------------------------
   const rowsQ = await pool.query(
     `
@@ -156,17 +160,12 @@ export async function getMonthlySalesDetail({
       u.id AS user_id,
       u.document_id AS user_document_id,
       u.name AS user_name,
-      u.active AS user_active,
       u.district AS user_district,
-      u.district_claro AS user_district_claro,
-
-      um.id AS monthly_id
+      u.district_claro AS user_district_claro
 
     FROM siapp.full_sales fs
     LEFT JOIN core.users u
       ON u.document_id::text = fs.idasesor::text
-    LEFT JOIN core.user_monthly um
-      ON um.user_id = u.id AND um.period_year=$1 AND um.period_month=$2
 
     WHERE ${baseWhere}
 
@@ -208,18 +207,19 @@ export async function getMonthlySalesDetail({
     else if (inDistrict === false) pageOut += 1;
     else pageUnclassified += 1;
 
+    const enNomina = !!r.user_id;
+
     // Si viene advisor_id, definimos header una sola vez (usando primera fila útil)
     if (advisor && !advisorHeader) {
       advisorHeader = {
         idasesor: r.idasesor,
         nombreasesor: r.nombreasesor,
 
-        en_sistema: !!r.user_id,
-        contratado_mes: !!r.monthly_id,
+        // Regla nueva: contratado = existe en core.users (nómina actual)
+        en_nomina: enNomina,
         user_id: r.user_id || null,
         user_document_id: r.user_document_id || null,
         user_name: r.user_name || null,
-        user_active: r.user_active ?? null,
 
         distrito_usuario: distritoUsuario || null,
         distrito_usuario_raw: {
@@ -291,9 +291,7 @@ export async function getMonthlySalesDetail({
         idasesor: r.idasesor,
         nombreasesor: r.nombreasesor,
 
-        en_sistema: !!r.user_id,
-        contratado_mes: !!r.monthly_id,
-
+        en_nomina: enNomina,
         distrito_usuario: distritoUsuario || null
       });
     }
@@ -322,12 +320,10 @@ export async function getMonthlySalesDetail({
       advisorHeader = {
         idasesor: advisor,
         nombreasesor: null,
-        en_sistema: null,
-        contratado_mes: null,
+        en_nomina: null,
         user_id: null,
         user_document_id: null,
         user_name: null,
-        user_active: null,
         distrito_usuario: null,
         distrito_usuario_raw: { district: null, district_claro: null },
         period: `${year}-${String(month).padStart(2, "0")}`,
@@ -347,3 +343,4 @@ export async function getMonthlySalesDetail({
     rows: listRows
   };
 }
+

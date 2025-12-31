@@ -1,18 +1,16 @@
 // ======================================================================
-// PROMOTE SIAPP FULL — VERSIÓN ACTUALIZADA 2025-12-24 (ROBUSTA)
-// Objetivo:
-//   - NO volver a “aplanar” todas las ventas a un solo periodo.
-//   - Guardar MULTI-MES en siapp.full_sales usando periodo derivado de FECHA.
-//   - NO truncar toda full_sales: reemplaza solo los meses presentes en staging
-//     (o solo el mes solicitado si se envía period=YYYY-MM).
-// Mantiene:
-//   - cantserv como VARCHAR (NO numeric)
-//   - casteo correcto de campos numeric reales
-//   - backup liviano y ordenado en historico.siapp_full_backup
-//
-// Mejora clave para evitar errores:
-//   - Se usa fecha_date = NULLIF(fecha::text,'')::date para soportar fecha como TEXT/DATE
-//   - Se omiten filas con fecha inválida y se reportan en el retorno
+// PROMOTE SIAPP FULL — 2025-12-28
+// MODOS:
+//  - mode="rebuild": borra y reemplaza SOLO los meses presentes en staging
+//                   (o solo el mes solicitado con period=YYYY-MM).
+//  - mode="merge":   inserta incremental (diario) usando OT como llave única:
+//                   INSERT ... ON CONFLICT (ot) DO UPDATE.
+// REGLAS:
+//  - period_year/month SIEMPRE derivado de fecha (no aplanar a un solo periodo)
+//  - NO se insertan filas con fecha inválida
+//  - Backup multi-mes en historico.siapp_full_backup
+//  - cantserv es VARCHAR (no cast)
+//  - casteo numérico solo en campos numeric reales
 // ======================================================================
 
 import pool from "../config/database.js";
@@ -27,16 +25,26 @@ function parsePeriod(period) {
   return { year, month };
 }
 
-export async function promoteSiappFull({ source_file = null, period = null } = {}) {
+function normalizeMode(mode) {
+  const m = String(mode || "rebuild").trim().toLowerCase();
+  if (m === "merge" || m === "rebuild") return m;
+  return "rebuild";
+}
+
+export async function promoteSiappFull({
+  source_file = null,
+  period = null,      // "YYYY-MM" opcional
+  mode = "rebuild"    // "rebuild" | "merge"
+} = {}) {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
     // ----------------------------------------------------
-    // 1. Validar que staging tiene datos
+    // 1) Validaciones base
     // ----------------------------------------------------
-    const check = await client.query(`SELECT COUNT(*) AS total FROM staging.siapp_full`);
+    const check = await client.query(`SELECT COUNT(*)::bigint AS total FROM staging.siapp_full`);
     const totalStaging = Number(check.rows[0]?.total || 0);
     if (totalStaging === 0) {
       throw new Error("No hay datos en staging.siapp_full");
@@ -47,28 +55,25 @@ export async function promoteSiappFull({ source_file = null, period = null } = {
       throw new Error("Formato de period inválido. Use YYYY-MM.");
     }
 
+    const safeMode = normalizeMode(mode);
+
     // ----------------------------------------------------
-    // 1.1 Contar filas con fecha inválida (para trazabilidad)
-    //      Nota: si fecha no puede castear a date -> queda NULL en fecha_date.
+    // 1.1) Contar filas con fecha inválida
     // ----------------------------------------------------
-    const invalidQ = await client.query(
-      `
+    const invalidQ = await client.query(`
       SELECT COUNT(*)::bigint AS invalid_fecha
       FROM staging.siapp_full fs
       WHERE NULLIF(fs.fecha::text,'')::date IS NULL
-      `
-    );
+    `);
     const invalidFecha = Number(invalidQ.rows[0]?.invalid_fecha || 0);
 
     // ----------------------------------------------------
-    // 2. Determinar meses a procesar (para logging/resultado)
-    //    Usamos fecha_date robusta
+    // 2) Determinar meses a procesar (según fecha)
     // ----------------------------------------------------
     const monthsQ = await client.query(
       `
       WITH base AS (
-        SELECT
-          NULLIF(fecha::text,'')::date AS fecha_date
+        SELECT NULLIF(fecha::text,'')::date AS fecha_date
         FROM staging.siapp_full
       )
       SELECT
@@ -94,17 +99,16 @@ export async function promoteSiappFull({ source_file = null, period = null } = {
     if (months.length === 0) {
       throw new Error(
         periodFilter
-          ? `No hay filas en staging.siapp_full para el periodo ${periodFilter.year}-${String(periodFilter.month).padStart(2, "0")} (o todas tienen fecha inválida)`
+          ? `No hay filas válidas con fecha para el periodo ${periodFilter.year}-${String(periodFilter.month).padStart(2, "0")} en staging.siapp_full`
           : "No hay filas válidas con fecha en staging.siapp_full"
       );
     }
 
-    // Un backup “run id” único
+    // ----------------------------------------------------
+    // 3) BACKUP multi-mes (siempre)
+    // ----------------------------------------------------
     const periodo_backup = `${Date.now()}`;
 
-    // ----------------------------------------------------
-    // 3. BACKUP (multi-mes): periodo_comercial por fila (derivado de fecha_date)
-    // ----------------------------------------------------
     await client.query(
       `
       INSERT INTO historico.siapp_full_backup (
@@ -141,9 +145,10 @@ export async function promoteSiappFull({ source_file = null, period = null } = {
         fs.poblacion,
         fs.d_distrito,
 
-        NULLIF(fs.renta, '')::numeric,          -- CAST CORRECTO
-        NULLIF(fs.fecha::text,'')::date,        -- fecha segura
+        NULLIF(fs.renta, '')::numeric,
+        NULLIF(fs.fecha::text,'')::date,
         fs.venta,
+
         fs.tipo_registro,
         fs.estrato,
         fs.paquete_pvd,
@@ -151,6 +156,7 @@ export async function promoteSiappFull({ source_file = null, period = null } = {
         fs.tipo_prodcuto,
         fs.venta_instale_dth,
         fs.sac_final,
+
         fs.cedula_vendedor,
         fs.nombre_vendedor,
         fs.modalidad_venta,
@@ -163,9 +169,9 @@ export async function promoteSiappFull({ source_file = null, period = null } = {
         fs.observ_retencion,
         fs.tipo_contrato,
 
-        NULLIF(fs.tarifa_venta, '')::numeric,    -- CAST
-        NULLIF(fs.comision_neta, '')::numeric,   -- CAST
-        NULLIF(fs.punto_equilibrio, '')::numeric,-- CAST
+        NULLIF(fs.tarifa_venta, '')::numeric,
+        NULLIF(fs.comision_neta, '')::numeric,
+        NULLIF(fs.punto_equilibrio, '')::numeric,
 
         fs.source_file
       FROM staging.siapp_full fs
@@ -176,125 +182,281 @@ export async function promoteSiappFull({ source_file = null, period = null } = {
       [periodo_backup, periodFilter?.year ?? null, periodFilter?.month ?? null]
     );
 
-    console.log(`✔ Backup SIAPP FULL creado. periodo_backup=${periodo_backup}`);
-
     // ----------------------------------------------------
-    // 4. Limpiar destino SOLO para los meses a insertar
+    // 4) Si mode=rebuild => borrar destino SOLO para meses a insertar
+    //    Si mode=merge   => NO borrar nada
     // ----------------------------------------------------
-    if (periodFilter) {
-      await client.query(
-        `DELETE FROM siapp.full_sales WHERE period_year = $1 AND period_month = $2`,
-        [periodFilter.year, periodFilter.month]
-      );
-    } else {
-      await client.query(`
-        WITH months AS (
-          SELECT DISTINCT
-            EXTRACT(YEAR FROM NULLIF(fecha::text,'')::date)::int  AS y,
-            EXTRACT(MONTH FROM NULLIF(fecha::text,'')::date)::int AS m
-          FROM staging.siapp_full
-          WHERE NULLIF(fecha::text,'')::date IS NOT NULL
-        )
-        DELETE FROM siapp.full_sales fs
-        USING months mo
-        WHERE fs.period_year = mo.y AND fs.period_month = mo.m
-      `);
+    if (safeMode === "rebuild") {
+      if (periodFilter) {
+        await client.query(
+          `DELETE FROM siapp.full_sales WHERE period_year = $1 AND period_month = $2`,
+          [periodFilter.year, periodFilter.month]
+        );
+      } else {
+        await client.query(`
+          WITH months AS (
+            SELECT DISTINCT
+              EXTRACT(YEAR FROM NULLIF(fecha::text,'')::date)::int  AS y,
+              EXTRACT(MONTH FROM NULLIF(fecha::text,'')::date)::int AS m
+            FROM staging.siapp_full
+            WHERE NULLIF(fecha::text,'')::date IS NOT NULL
+          )
+          DELETE FROM siapp.full_sales fs
+          USING months mo
+          WHERE fs.period_year = mo.y AND fs.period_month = mo.m
+        `);
+      }
     }
 
     // ----------------------------------------------------
-    // 5. Insertar desde staging → full_sales
-    //    (period_year/month derivado de fecha_date robusta)
+    // 5) Insert / Upsert desde staging → full_sales
+    //    - Rebuild: INSERT normal
+    //    - Merge: UPSERT por OT (requiere ux_full_sales_ot)
     // ----------------------------------------------------
-    const insertResult = await client.query(
-      `
-      INSERT INTO siapp.full_sales (
-        period_year, period_month,
-        estado_liquidacion, linea_negocio, cuenta, ot,
-        idasesor, nombreasesor, cantserv, tipored, division,
-        area, zona, poblacion, d_distrito,
-        renta, fecha, venta,
-        tipo_registro, estrato, paquete_pvd, mintic, tipo_prodcuto,
-        ventaconvergente, venta_instale_dth, sac_final,
-        cedula_vendedor, nombre_vendedor, modalidad_venta,
-        tipo_vendedor, tipo_red_comercial, nombre_regional,
-        nombre_comercial, nombre_lider, retencion_control,
-        observ_retencion, tipo_contrato,
-        tarifa_venta, comision_neta, punto_equilibrio,
-        raw_json, source_file
-      )
-      SELECT
-        EXTRACT(YEAR FROM NULLIF(fecha::text,'')::date)::int,
-        EXTRACT(MONTH FROM NULLIF(fecha::text,'')::date)::int,
+    let total_insertados = 0;
+    let total_actualizados = 0;
 
-        estado_liquidacion,
-        linea_negocio,
-        cuenta,
-        ot,
-        idasesor,
-        nombreasesor,
+    if (safeMode === "merge") {
+      // Nota: ON CONFLICT usa tu índice único por (ot) con el WHERE.
+      // Como staging garantiza ot no vacío, no hay problema.
+      const upsertQ = await client.query(
+        `
+        WITH upserted AS (
+          INSERT INTO siapp.full_sales (
+            period_year, period_month,
+            estado_liquidacion, linea_negocio, cuenta, ot,
+            idasesor, nombreasesor, cantserv, tipored, division,
+            area, zona, poblacion, d_distrito,
+            renta, fecha, venta,
+            tipo_registro, estrato, paquete_pvd, mintic, tipo_prodcuto,
+            ventaconvergente, venta_instale_dth, sac_final,
+            cedula_vendedor, nombre_vendedor, modalidad_venta,
+            tipo_vendedor, tipo_red_comercial, nombre_regional,
+            nombre_comercial, nombre_lider, retencion_control,
+            observ_retencion, tipo_contrato,
+            tarifa_venta, comision_neta, punto_equilibrio,
+            raw_json, source_file,
+            updated_at
+          )
+          SELECT
+            EXTRACT(YEAR FROM NULLIF(fecha::text,'')::date)::int,
+            EXTRACT(MONTH FROM NULLIF(fecha::text,'')::date)::int,
 
-        cantserv,                     -- VARCHAR (NO CAST)
+            estado_liquidacion,
+            linea_negocio,
+            cuenta,
+            ot,
+            idasesor,
+            nombreasesor,
 
-        tipored,
-        division,
-        area,
-        zona,
-        poblacion,
-        d_distrito,
+            cantserv,                      -- VARCHAR
 
-        NULLIF(renta,'')::numeric,
-        NULLIF(fecha::text,'')::date,  -- fecha segura
-        venta,
+            tipored,
+            division,
+            area,
+            zona,
+            poblacion,
+            d_distrito,
 
-        tipo_registro,
-        estrato,
-        paquete_pvd,
-        mintic,
-        tipo_prodcuto,
-        ventaconvergente,
-        venta_instale_dth,
-        sac_final,
-        cedula_vendedor,
-        nombre_vendedor,
-        modalidad_venta,
-        tipo_vendedor,
-        tipo_red_comercial,
-        nombre_regional,
-        nombre_comercial,
-        nombre_lider,
-        retencion_control,
-        observ_retencion,
-        tipo_contrato,
+            NULLIF(renta,'')::numeric,
+            NULLIF(fecha::text,'')::date,
+            venta,
 
-        NULLIF(tarifa_venta,'')::numeric,
-        NULLIF(comision_neta,'')::numeric,
-        NULLIF(punto_equilibrio,'')::numeric,
+            tipo_registro,
+            estrato,
+            paquete_pvd,
+            mintic,
+            tipo_prodcuto,
+            ventaconvergente,
+            venta_instale_dth,
+            sac_final,
 
-        raw_json,
-        COALESCE(source_file, $1)
-      FROM staging.siapp_full
-      WHERE NULLIF(fecha::text,'')::date IS NOT NULL
-        AND ($2::int IS NULL OR EXTRACT(YEAR FROM NULLIF(fecha::text,'')::date)::int = $2)
-        AND ($3::int IS NULL OR EXTRACT(MONTH FROM NULLIF(fecha::text,'')::date)::int = $3)
-      RETURNING 1
-      `,
-      [source_file, periodFilter?.year ?? null, periodFilter?.month ?? null]
-    );
+            cedula_vendedor,
+            nombre_vendedor,
+            modalidad_venta,
+            tipo_vendedor,
+            tipo_red_comercial,
+            nombre_regional,
+            nombre_comercial,
+            nombre_lider,
+            retencion_control,
+            observ_retencion,
+            tipo_contrato,
 
-    const total_insertados = insertResult.rowCount;
+            NULLIF(tarifa_venta,'')::numeric,
+            NULLIF(comision_neta,'')::numeric,
+            NULLIF(punto_equilibrio,'')::numeric,
+
+            raw_json,
+            COALESCE(source_file, $1),
+            NOW()
+          FROM staging.siapp_full
+          WHERE NULLIF(fecha::text,'')::date IS NOT NULL
+            AND ($2::int IS NULL OR EXTRACT(YEAR FROM NULLIF(fecha::text,'')::date)::int = $2)
+            AND ($3::int IS NULL OR EXTRACT(MONTH FROM NULLIF(fecha::text,'')::date)::int = $3)
+
+          ON CONFLICT (ot) WHERE ot IS NOT NULL AND BTRIM(ot) <> ''
+          DO UPDATE SET
+            period_year        = EXCLUDED.period_year,
+            period_month       = EXCLUDED.period_month,
+
+            estado_liquidacion = EXCLUDED.estado_liquidacion,
+            linea_negocio      = EXCLUDED.linea_negocio,
+            cuenta             = EXCLUDED.cuenta,
+
+            idasesor           = EXCLUDED.idasesor,
+            nombreasesor       = EXCLUDED.nombreasesor,
+            cantserv           = EXCLUDED.cantserv,
+            tipored            = EXCLUDED.tipored,
+            division           = EXCLUDED.division,
+            area               = EXCLUDED.area,
+            zona               = EXCLUDED.zona,
+            poblacion          = EXCLUDED.poblacion,
+            d_distrito         = EXCLUDED.d_distrito,
+
+            renta              = EXCLUDED.renta,
+            fecha              = EXCLUDED.fecha,
+            venta              = EXCLUDED.venta,
+
+            tipo_registro      = EXCLUDED.tipo_registro,
+            estrato            = EXCLUDED.estrato,
+            paquete_pvd        = EXCLUDED.paquete_pvd,
+            mintic             = EXCLUDED.mintic,
+            tipo_prodcuto      = EXCLUDED.tipo_prodcuto,
+            ventaconvergente   = EXCLUDED.ventaconvergente,
+            venta_instale_dth  = EXCLUDED.venta_instale_dth,
+            sac_final          = EXCLUDED.sac_final,
+
+            cedula_vendedor    = EXCLUDED.cedula_vendedor,
+            nombre_vendedor    = EXCLUDED.nombre_vendedor,
+            modalidad_venta    = EXCLUDED.modalidad_venta,
+            tipo_vendedor      = EXCLUDED.tipo_vendedor,
+            tipo_red_comercial = EXCLUDED.tipo_red_comercial,
+
+            nombre_regional    = EXCLUDED.nombre_regional,
+            nombre_comercial   = EXCLUDED.nombre_comercial,
+            nombre_lider       = EXCLUDED.nombre_lider,
+            retencion_control  = EXCLUDED.retencion_control,
+            observ_retencion   = EXCLUDED.observ_retencion,
+            tipo_contrato      = EXCLUDED.tipo_contrato,
+
+            tarifa_venta       = EXCLUDED.tarifa_venta,
+            comision_neta      = EXCLUDED.comision_neta,
+            punto_equilibrio   = EXCLUDED.punto_equilibrio,
+
+            raw_json           = EXCLUDED.raw_json,
+            source_file        = EXCLUDED.source_file,
+            updated_at         = NOW()
+
+          RETURNING (xmax = 0) AS inserted
+        )
+        SELECT
+          SUM(CASE WHEN inserted THEN 1 ELSE 0 END)::bigint AS inserted_count,
+          SUM(CASE WHEN inserted THEN 0 ELSE 1 END)::bigint AS updated_count
+        FROM upserted
+        `,
+        [source_file, periodFilter?.year ?? null, periodFilter?.month ?? null]
+      );
+
+      total_insertados = Number(upsertQ.rows[0]?.inserted_count || 0);
+      total_actualizados = Number(upsertQ.rows[0]?.updated_count || 0);
+    } else {
+      // rebuild: inserción directa
+      const insertResult = await client.query(
+        `
+        INSERT INTO siapp.full_sales (
+          period_year, period_month,
+          estado_liquidacion, linea_negocio, cuenta, ot,
+          idasesor, nombreasesor, cantserv, tipored, division,
+          area, zona, poblacion, d_distrito,
+          renta, fecha, venta,
+          tipo_registro, estrato, paquete_pvd, mintic, tipo_prodcuto,
+          ventaconvergente, venta_instale_dth, sac_final,
+          cedula_vendedor, nombre_vendedor, modalidad_venta,
+          tipo_vendedor, tipo_red_comercial, nombre_regional,
+          nombre_comercial, nombre_lider, retencion_control,
+          observ_retencion, tipo_contrato,
+          tarifa_venta, comision_neta, punto_equilibrio,
+          raw_json, source_file
+        )
+        SELECT
+          EXTRACT(YEAR FROM NULLIF(fecha::text,'')::date)::int,
+          EXTRACT(MONTH FROM NULLIF(fecha::text,'')::date)::int,
+
+          estado_liquidacion,
+          linea_negocio,
+          cuenta,
+          ot,
+          idasesor,
+          nombreasesor,
+
+          cantserv,                     -- VARCHAR
+
+          tipored,
+          division,
+          area,
+          zona,
+          poblacion,
+          d_distrito,
+
+          NULLIF(renta,'')::numeric,
+          NULLIF(fecha::text,'')::date,
+          venta,
+
+          tipo_registro,
+          estrato,
+          paquete_pvd,
+          mintic,
+          tipo_prodcuto,
+          ventaconvergente,
+          venta_instale_dth,
+          sac_final,
+
+          cedula_vendedor,
+          nombre_vendedor,
+          modalidad_venta,
+          tipo_vendedor,
+          tipo_red_comercial,
+          nombre_regional,
+          nombre_comercial,
+          nombre_lider,
+          retencion_control,
+          observ_retencion,
+          tipo_contrato,
+
+          NULLIF(tarifa_venta,'')::numeric,
+          NULLIF(comision_neta,'')::numeric,
+          NULLIF(punto_equilibrio,'')::numeric,
+
+          raw_json,
+          COALESCE(source_file, $1)
+        FROM staging.siapp_full
+        WHERE NULLIF(fecha::text,'')::date IS NOT NULL
+          AND ($2::int IS NULL OR EXTRACT(YEAR FROM NULLIF(fecha::text,'')::date)::int = $2)
+          AND ($3::int IS NULL OR EXTRACT(MONTH FROM NULLIF(fecha::text,'')::date)::int = $3)
+        RETURNING 1
+        `,
+        [source_file, periodFilter?.year ?? null, periodFilter?.month ?? null]
+      );
+
+      total_insertados = insertResult.rowCount;
+      total_actualizados = 0;
+    }
 
     await client.query("COMMIT");
 
     return {
       ok: true,
+      mode: safeMode,
       periodo_backup,
       filtro_periodo: periodFilter
         ? `${periodFilter.year}-${String(periodFilter.month).padStart(2, "0")}`
         : null,
-      meses_insertados: months,
+      meses_detectados_en_staging: months,
       total_staging: totalStaging,
+      filas_con_fecha_invalida_en_staging: invalidFecha,
       total_insertados,
-      filas_con_fecha_invalida_en_staging: invalidFecha
+      total_actualizados
     };
   } catch (err) {
     await client.query("ROLLBACK");

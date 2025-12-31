@@ -1,34 +1,27 @@
 // controllers/promote/presupuesto_jerarquia.js
 import { promotePresupuestoJerarquia } from "../../services/promote.presupuesto_jerarquia.service.js";
 
-/**
- * Promueve los datos ya importados en staging.presupuesto_jerarquia
- * hacia:
- *   - core.org_units  (GERENCIA / DIRECCION / COORDINACION / DISTRITO)
- *   - core.users      (gerentes, directores, coordinadores, asesores)
- *
- * No recibe body, solo ejecuta la lógica de promote.
- */
 export async function promotePresupuestoJerarquiaController(req, res) {
   try {
-    console.log("[PROMOTE PJ] Iniciando promote de Presupuesto Jerarquía...");
+    const { backup } = req.query;
 
-    const result = await promotePresupuestoJerarquia();
+    const do_backup =
+      backup === "1" || String(backup).toLowerCase() === "true" || backup === true;
 
-    console.log("[PROMOTE PJ] Promote completado.");
+    console.log("[PROMOTE PJ] Iniciando promote Presupuesto Jerarquía...", { do_backup });
+
+    const result = await promotePresupuestoJerarquia({ do_backup });
 
     return res.json({
       ok: true,
-      message: "Promoción de Presupuesto Jerarquía ejecutada correctamente",
+      message: "Promote Presupuesto Jerarquía ejecutado correctamente",
       ...result
     });
-
   } catch (e) {
-    console.error("[PROMOTE PJ] Error en promote Presupuesto Jerarquía:", e);
-
+    console.error("[PROMOTE PJ] Error:", e);
     return res.status(500).json({
       ok: false,
-      error: "No se pudo promover Presupuesto Jerarquía a core.org_units / core.users",
+      error: "No se pudo promover Presupuesto Jerarquía",
       detail: e.message
     });
   }
