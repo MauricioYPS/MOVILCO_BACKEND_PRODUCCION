@@ -1,6 +1,7 @@
 // controllers/export/nomina/exportNomina.controller.js
 import ExcelJS from "exceljs";
 import pool from "../../config/database.js";
+import { promoteSiappFromFullSales } from "../../services/promote.siapp.service.js";
 
 // ======================================================
 // Helpers
@@ -21,12 +22,6 @@ function normalizeCedulaToNumber(v) {
   if (!s) return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
-}
-
-function clamp(n, min, max) {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return min;
-  return Math.min(Math.max(x, min), max);
 }
 
 // ======================================================
@@ -66,21 +61,12 @@ function styleSectionRow(ws) {
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } };
   });
 
-  // Secciones (con ITEM=A)
-  // K-M: presupuesto
-  // O-Q: garantizados
-  // R-X: ventas + cumplimiento
   const fillGray = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF2F2F2" } };
   const fillRed = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } };
 
-  // 1er parte presupuesto
   for (const c of ["K", "L", "M"]) ws.getCell(`${c}2`).fill = fillGray;
-
-  // validación garantizado
   for (const c of ["O", "P", "Q"]) ws.getCell(`${c}2`).fill = fillGray;
-
-  // resultado ventas
-  for (const c of ["R", "S", "T", "U", "V", "W", "X"]) ws.getCell(`${c}2`).fill = fillRed;
+  for (const c of ["R", "S", "T", "U", "V", "W", "X", "Y"]) ws.getCell(`${c}2`).fill = fillRed;
 }
 
 function styleHeaderRow(ws) {
@@ -96,80 +82,67 @@ function styleHeaderRow(ws) {
     cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
   });
 
-  // Colores por sección (aprox al excel que mostraste)
-  // L y O: naranja (días)
   const orange = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF4B183" } };
-  // M y Q: verde suave (prorrateo / garantizado con novedades)
   const greenSoft = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6E0B4" } };
-  // P: verde fuerte (garantizado para comisionar)
   const greenStrong = { type: "pattern", pattern: "solid", fgColor: { argb: "FF92D050" } };
-  // R-T + W-X: rojo (ventas + cumple)
   const red = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFF0000" } };
-  // U-V: naranja/amarillo (diferencias)
   const diff = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC000" } };
 
-  ws.getCell("L3").fill = orange; // días (validar novedades)
-  ws.getCell("M3").fill = greenSoft; // prorrateo
-  ws.getCell("O3").fill = orange; // días (2da parte)
-  ws.getCell("P3").fill = greenStrong; // garantizado comisionar
-  ws.getCell("Q3").fill = greenSoft; // garantizado con novedades
+  ws.getCell("L3").fill = orange;
+  ws.getCell("M3").fill = greenSoft;
+  ws.getCell("O3").fill = orange;
+  ws.getCell("P3").fill = greenStrong;
+  ws.getCell("Q3").fill = greenSoft;
 
   for (const c of ["R", "S", "T"]) ws.getCell(`${c}3`).fill = red;
   for (const c of ["U", "V"]) ws.getCell(`${c}3`).fill = diff;
-  for (const c of ["W", "X"]) ws.getCell(`${c}3`).fill = red;
+  for (const c of ["X", "Y"]) ws.getCell(`${c}3`).fill = red;
 }
 
 function setNumberFormats(ws) {
-  // Con ITEM=A, CEDULA=B
   ws.getColumn("A").numFmt = "0";
   ws.getColumn("B").numFmt = "0";
 
-  // Fechas
   ws.getColumn("G").numFmt = "yyyy-mm-dd";
   ws.getColumn("H").numFmt = "yyyy-mm-dd";
 
-  // Presupuesto/Prorrateo/Garantizados
-  ws.getColumn("K").numFmt = "0.00";
+  ws.getColumn("K").numFmt = "0";
   ws.getColumn("L").numFmt = "0";
   ws.getColumn("M").numFmt = "0.00";
+
   ws.getColumn("O").numFmt = "0";
-  ws.getColumn("P").numFmt = "0.00";
+  ws.getColumn("P").numFmt = "0";
   ws.getColumn("Q").numFmt = "0.00";
 
-  // Ventas + difs
-  for (const c of ["R", "S", "T", "U", "V"]) ws.getColumn(c).numFmt = "0";
+  for (const c of ["R", "S", "T", "U", "V", "W"]) ws.getColumn(c).numFmt = "0";
 }
-function addComplianceConditionalFormatting(ws) {
-  // Datos empiezan en fila 4 (porque congelamos hasta fila 3)
-  const startRow = 4;
-  const endRow = 5000; // suficientemente alto para nómina
 
-  // Columnas W y X
-  for (const col of ["W", "X"]) {
+function addComplianceConditionalFormatting(ws) {
+  const startRow = 4;
+  const endRow = 5000;
+
+  for (const col of ["X", "Y"]) {
     const ref = `${col}${startRow}:${col}${endRow}`;
 
     ws.addConditionalFormatting({
       ref,
       rules: [
-        // CUMPLE = verde
         {
           type: "expression",
           formulae: [`${col}${startRow}="CUMPLE"`],
           style: {
-            fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6EFCE" } }, // verde suave
+            fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFC6EFCE" } },
             font: { color: { argb: "FF006100" }, bold: true }
           }
         },
-        // NO CUMPLE = rojo
         {
           type: "expression",
           formulae: [`${col}${startRow}="NO CUMPLE"`],
           style: {
-            fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } }, // rojo suave
+            fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFC7CE" } },
             font: { color: { argb: "FF9C0006" }, bold: true }
           }
         },
-        // NO APLICA = gris (opcional)
         {
           type: "expression",
           formulae: [`${col}${startRow}="NO APLICA"`],
@@ -183,41 +156,11 @@ function addComplianceConditionalFormatting(ws) {
   }
 }
 
-
 function addNominaSheet(wb, sheetName) {
   const ws = wb.addWorksheet(sheetName);
 
-  // Fila 1 vacía (similar al archivo ejemplo)
   ws.addRow([]);
-
-  // Fila 2: secciones (con merges)
-  const row2 = ws.addRow(new Array(24).fill(""));
-
-  // Columnas (24):
-  // A ITEM
-  // B CEDULA
-  // C NOMBRE
-  // D CONTRATADO
-  // E DISTRITO
-  // F DISTRITO CLARO
-  // G FECHA INICIO
-  // H FECHA FIN
-  // I NOVEDADES
-  // J ESTADO
-  // K PRESUPUESTO
-  // L DIAS (validar)
-  // M PRORRATEO
-  // N (separador)
-  // O DIAS (validar)
-  // P GARANTIZADO COMISIONAR
-  // Q GARANTIZADO CON NOVEDADES
-  // R Ventas distrito
-  // S Ventas fuera
-  // T Total ventas
-  // U Dif distrito
-  // V Dif totales
-  // W Cumple zonificado
-  // X Cumple global
+  ws.addRow(new Array(25).fill(""));
 
   ws.getCell("K2").value = "1ER PARTE ENVIO PRESUPUESTO";
   ws.mergeCells("K2:M2");
@@ -226,9 +169,8 @@ function addNominaSheet(wb, sheetName) {
   ws.mergeCells("O2:Q2");
 
   ws.getCell("R2").value = "3ER PARTE RESULTADO DE VENTAS (CRUCE REALIZA EL SISTEMA CON SIAPP)";
-  ws.mergeCells("R2:X2");
+  ws.mergeCells("R2:Y2");
 
-  // Fila 3: headers exactos (con ITEM)
   ws.addRow([
     "ITEM",
     "CEDULA",
@@ -243,12 +185,13 @@ function addNominaSheet(wb, sheetName) {
     "PRESUPUESTO MES",
     "DIAS LABORADOS AL 31 MES ( VALIDAR NOVEDADES DEL MES)",
     "PRORRATEO SEGÚN NOVEDADES PARA CUMPLIMIENTO",
-    "", // separador como tu ejemplo
+    "",
     "DIAS LABORADOS AL 31 MES ( VALIDAR NOVEDADES DEL MES)",
     "GARANTIZADO PARA COMISIONAR",
     "GARANTIZADO AL 31 AGOSTO ( CON NOVEDADES)",
     "Ventas en el Distrito",
     "Ventas Fuera del Distrito",
+    "Ventas No Zonificadas",
     "TOTAL VENTAS",
     "DIFERENCIA VENTAS EN DISTRITO",
     "DIFERENCIA VENTAS TOTALES",
@@ -261,11 +204,130 @@ function addNominaSheet(wb, sheetName) {
   setNumberFormats(ws);
   addComplianceConditionalFormatting(ws);
 
-
-  // Congelar
   ws.views = [{ state: "frozen", xSplit: 0, ySplit: 3 }];
 
   return ws;
+}
+
+// ======================================================
+// (B) AUTOMÁTICO: BACKFILL/REFRESH USER_MONTHLY + RECALC PROGRESS
+//   - Respeta kpi.dias_laborados_manual (override)
+// ======================================================
+async function ensureMonthlyAndProgress({ yy, mm, periodStr }) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const backfill = await client.query(
+      `
+      WITH bounds AS (
+        SELECT
+          make_date($1::int,$2::int,1)::date AS month_start,
+          (make_date($1::int,$2::int,1) + interval '1 month' - interval '1 day')::date AS month_end,
+          EXTRACT(DAY FROM (make_date($1::int,$2::int,1) + interval '1 month' - interval '1 day'))::int AS days_in_month
+      ),
+      users_sel AS (
+        SELECT u.id AS user_id
+        FROM core.users u
+        WHERE u.role IN ('ASESORIA')
+          AND u.active = true
+      ),
+      budgets AS (
+        SELECT b.user_id, COALESCE(b.budget_amount,0)::numeric AS presupuesto_mes
+        FROM core.budgets b
+        WHERE b.period = $3
+      ),
+      nov_days AS (
+        SELECT
+          n.user_id,
+          COUNT(DISTINCT gs::date)::int AS non_worked_days
+        FROM core.user_novelties n
+        CROSS JOIN bounds b
+        CROSS JOIN LATERAL generate_series(
+          GREATEST(n.start_date::date, b.month_start),
+          LEAST(n.end_date::date, b.month_end),
+          interval '1 day'
+        ) gs
+        WHERE n.start_date::date <= b.month_end
+          AND n.end_date::date >= b.month_start
+        GROUP BY n.user_id
+      ),
+      manual_days AS (
+        SELECT md.user_id, md.dias::int AS dias_manual
+        FROM kpi.dias_laborados_manual md
+        WHERE md.period_year = $1
+          AND md.period_month = $2
+      ),
+      calc AS (
+        SELECT
+          us.user_id,
+          COALESCE(bu.presupuesto_mes, 0)::numeric AS presupuesto_mes,
+          (SELECT days_in_month FROM bounds)::int AS days_in_month,
+          COALESCE(nd.non_worked_days, 0)::int AS non_worked_days,
+          -- auto
+          GREATEST((SELECT days_in_month FROM bounds)::int - COALESCE(nd.non_worked_days,0)::int, 0)::int AS dias_auto,
+          -- manual override si existe
+          md.dias_manual
+        FROM users_sel us
+        LEFT JOIN budgets bu ON bu.user_id = us.user_id
+        LEFT JOIN nov_days nd ON nd.user_id = us.user_id
+        LEFT JOIN manual_days md ON md.user_id = us.user_id
+      ),
+      final_calc AS (
+        SELECT
+          c.user_id,
+          c.presupuesto_mes,
+          c.days_in_month,
+          COALESCE(c.dias_manual, c.dias_auto)::int AS dias_laborados_final
+        FROM calc c
+      )
+      INSERT INTO core.user_monthly (
+        user_id, period_year, period_month,
+        presupuesto_mes, dias_laborados, prorrateo,
+        updated_at
+      )
+      SELECT
+        fc.user_id,
+        $1::int AS period_year,
+        $2::int AS period_month,
+        fc.presupuesto_mes,
+        fc.dias_laborados_final,
+        CASE
+          WHEN fc.presupuesto_mes > 0 AND fc.days_in_month > 0
+          THEN ROUND((fc.presupuesto_mes * fc.dias_laborados_final::numeric) / fc.days_in_month::numeric, 4)
+          ELSE 0
+        END AS prorrateo,
+        now()
+      FROM final_calc fc
+      ON CONFLICT (user_id, period_year, period_month)
+      DO UPDATE SET
+        presupuesto_mes = EXCLUDED.presupuesto_mes,
+        dias_laborados  = EXCLUDED.dias_laborados,
+        prorrateo       = EXCLUDED.prorrateo,
+        updated_at      = now()
+      `,
+      [yy, mm, periodStr]
+    );
+
+    await client.query("COMMIT");
+
+    const promote = await promoteSiappFromFullSales({ period_year: yy, period_month: mm });
+
+    return {
+      monthly_backfill: {
+        ok: true,
+        upsert_attempted: Number(backfill?.rowCount || 0)
+      },
+      progress_recalc: promote
+    };
+  } catch (e) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ======================================================
@@ -290,6 +352,12 @@ export async function exportNominaController(req, res) {
 
     const periodStr = `${yy}-${pad2(mm)}`;
 
+    // ============================================================
+    // (B) AUTOMÁTICO: antes de exportar, asegurar monthly y progress
+    //  - ahora respeta manual_days
+    // ============================================================
+    const auto = await ensureMonthlyAndProgress({ yy, mm, periodStr });
+
     // month dim
     const { rows: dimRows } = await pool.query(
       `
@@ -303,63 +371,98 @@ export async function exportNominaController(req, res) {
 
     const monthStart = dimRows[0].month_start;
     const monthEnd = dimRows[0].month_end;
-    const daysInMonth = Number(dimRows?.[0]?.days_in_month || 30);
+    const daysInMonthFallback = Number(dimRows?.[0]?.days_in_month || 30);
 
     // ============================================================
-    // HOJA 1: EN SISTEMA (con user) => fuente ventas = core.progress
-    // Universo: usuarios que aparecen en progress del periodo
-    // (Si quieres ampliar a user_monthly también, te dejo el WHERE listo)
+    // HOJA 1: EN SISTEMA (TODOS LOS USERS)
+    //  - Se apoya en core.user_monthly (ya calculado y con manual)
     // ============================================================
     const { rows: nominaUsers } = await pool.query(
       `
-      WITH nov AS (
-        SELECT n.user_id,
+      WITH bounds AS (
+        SELECT
+          make_date($1::int,$2::int,1)::date AS month_start,
+          (make_date($1::int,$2::int,1) + interval '1 month' - interval '1 day')::date AS month_end,
+          EXTRACT(DAY FROM (make_date($1::int,$2::int,1) + interval '1 month' - interval '1 day'))::int AS days_in_month
+      ),
+      users_sel AS (
+        SELECT
+          u.id,
+          u.document_id::text AS cedula,
+          u.name,
+          u.district,
+          u.district_claro,
+          u.contract_start,
+          u.contract_end,
+          u.contract_status,
+          u.active
+        FROM core.users u
+        WHERE u.role IN ('ASESORIA')
+          AND u.active = true
+      ),
+      nov_days AS (
+        SELECT
+          n.user_id,
+          COUNT(DISTINCT gs::date)::int AS non_worked_days,
           STRING_AGG(
             n.novelty_type || ' ' ||
             to_char(n.start_date,'DD/MM/YYYY') || ' AL ' ||
             to_char(n.end_date,'DD/MM/YYYY'),
             ' | '
+            ORDER BY n.start_date ASC
           ) AS novedades
         FROM core.user_novelties n
-        WHERE (n.start_date, n.end_date)
-          OVERLAPS ($3::date, $4::date)
+        CROSS JOIN bounds b
+        CROSS JOIN LATERAL generate_series(
+          GREATEST(n.start_date::date, b.month_start),
+          LEAST(n.end_date::date, b.month_end),
+          interval '1 day'
+        ) gs
+        WHERE n.start_date::date <= b.month_end
+          AND n.end_date::date >= b.month_start
         GROUP BY n.user_id
-      ),
-      base AS (
-        SELECT
-          u.id AS user_id,
-          u.document_id::text AS cedula,
-          u.name AS funcionario,
-          u.district AS distrito,
-          u.district_claro AS distrito_claro,
-          u.contract_start,
-          u.contract_end,
-          u.contract_status,
-          u.active,
-
-          um.presupuesto_mes,
-          um.dias_laborados,
-          um.prorrateo,
-
-          p.real_in_count::int   AS ventas_distrito,
-          p.real_out_count::int  AS ventas_fuera,
-          p.real_total_count::int AS total_ventas,
-
-          COALESCE(nov.novedades,'') AS novedades
-        FROM core.progress p
-        JOIN core.users u ON u.id = p.user_id
-        LEFT JOIN core.user_monthly um
-          ON um.user_id = u.id AND um.period_year = $1 AND um.period_month = $2
-        LEFT JOIN nov ON nov.user_id = u.id
-        WHERE p.period_year = $1 AND p.period_month = $2
-        -- Si en algún mes quieres incluir también gente de user_monthly aunque no tenga ventas:
-        -- OR um.user_id IS NOT NULL
       )
-      SELECT *
-      FROM base
+      SELECT
+        u.id AS user_id,
+        u.cedula,
+        u.name AS funcionario,
+        u.district AS distrito,
+        u.district_claro AS distrito_claro,
+        u.contract_start,
+        u.contract_end,
+        u.contract_status,
+        u.active,
+
+        COALESCE(um.presupuesto_mes, bu.budget_amount, 0)::numeric AS presupuesto_mes,
+        COALESCE(um.dias_laborados, 0)::int AS dias_laborados,
+        COALESCE(um.prorrateo, 0)::numeric AS prorrateo,
+
+        COALESCE(nd.non_worked_days, 0)::int AS non_worked_days,
+        COALESCE(nd.novedades,'') AS novedades,
+
+        COALESCE(p.real_in_count, 0)::int        AS ventas_distrito,
+        COALESCE(p.real_out_count, 0)::int       AS ventas_fuera,
+        COALESCE(p.real_unzoned_count, 0)::int   AS ventas_no_zonificadas,
+        COALESCE(p.real_total_count, 0)::int     AS total_ventas,
+
+        (SELECT days_in_month FROM bounds) AS days_in_month
+      FROM users_sel u
+      LEFT JOIN core.user_monthly um
+        ON um.user_id = u.id
+       AND um.period_year = $1
+       AND um.period_month = $2
+      LEFT JOIN core.budgets bu
+        ON bu.user_id = u.id
+       AND bu.period = $3
+      LEFT JOIN nov_days nd
+        ON nd.user_id = u.id
+      LEFT JOIN core.progress p
+        ON p.user_id = u.id
+       AND p.period_year = $1
+       AND p.period_month = $2
       ORDER BY total_ventas DESC, funcionario ASC
       `,
-      [yy, mm, monthStart, monthEnd]
+      [yy, mm, periodStr]
     );
 
     // ============================================================
@@ -399,49 +502,32 @@ export async function exportNominaController(req, res) {
 
     let item = 1;
     for (const r of nominaUsers) {
-      // CONTRATADO: overlap contrato con mes (no depende de user_monthly)
-      const contractStart = r.contract_start ? new Date(r.contract_start) : null;
-      const contractEnd = r.contract_end ? new Date(r.contract_end) : null;
       const overlaps =
-        contractStart &&
-        contractStart <= new Date(monthEnd) &&
-        (!contractEnd || contractEnd >= new Date(monthStart));
+        r.contract_start &&
+        new Date(r.contract_start) <= new Date(monthEnd) &&
+        (!r.contract_end || new Date(r.contract_end) >= new Date(monthStart));
 
       const contratado = "SI";
-
-
-      // ESTADO: preferir contract_status si viene, si no derivar
       const estado = r.contract_status ?? (overlaps ? "ACTIVO" : "RETIRADO");
 
+      const daysInMonth = Number(r.days_in_month || daysInMonthFallback || 30);
+
+      // IMPORTANTÍSIMO: ahora vienen de core.user_monthly (ya respeta manual)
+      const diasLaborados = Number(r.dias_laborados ?? 0);
       const presupuestoMes = r.presupuesto_mes != null ? Number(r.presupuesto_mes) : 0;
+      const prorrateo = r.prorrateo != null ? Math.round(Number(r.prorrateo)) : 0; // redondeo
 
-      const diasLaborados = r.dias_laborados != null && Number.isFinite(Number(r.dias_laborados))
-        ? Number(r.dias_laborados)
-        : daysInMonth;
-
-      // PRORRATEO: usar um.prorrateo o fallback (presupuesto * dias/diasMes)
-      let prorrateo = 0;
-      if (r.prorrateo != null && Number.isFinite(Number(r.prorrateo))) {
-        prorrateo = Number(r.prorrateo);
-      } else if (presupuestoMes > 0) {
-        prorrateo = (presupuestoMes * diasLaborados) / daysInMonth;
-      } else {
-        prorrateo = 0;
-      }
-
-      // Garantizados
       const garantizadoParaComisionar = presupuestoMes;
       const garantizadoConNovedades = prorrateo;
 
       const ventasDistrito = Number(r.ventas_distrito || 0);
       const ventasFuera = Number(r.ventas_fuera || 0);
+      const ventasNoZon = Number(r.ventas_no_zonificadas || 0);
       const totalVentas = Number(r.total_ventas || 0);
 
-      // Diferencias (como tu ejemplo)
       const difDistrito = Math.trunc(ventasDistrito - garantizadoConNovedades);
       const difTotal = Math.trunc(totalVentas - garantizadoConNovedades);
 
-      // Cumple
       const cumpleZonificado =
         garantizadoConNovedades > 0
           ? (ventasDistrito >= garantizadoConNovedades ? "CUMPLE" : "NO CUMPLE")
@@ -466,12 +552,13 @@ export async function exportNominaController(req, res) {
         presupuestoMes,
         diasLaborados,
         prorrateo,
-        "", // separador
+        "",
         diasLaborados,
         garantizadoParaComisionar,
         garantizadoConNovedades,
         ventasDistrito,
         ventasFuera,
+        ventasNoZon,
         totalVentas,
         difDistrito,
         difTotal,
@@ -480,17 +567,16 @@ export async function exportNominaController(req, res) {
       ]);
     }
 
-    // Hoja 2 (mismo formato)
+    // Hoja 2
     const wsFuera = addNominaSheet(wb, "Fuera Sistema");
 
     let item2 = 1;
     for (const r of fueraSistema) {
       const totalVentas = Number(r.total_ventas || 0);
 
-      // En fuera sistema:
-      // - No hay distrito usuario => no se puede zonificar => todo lo tratamos como "fuera distrito"
       const ventasDistrito = 0;
       const ventasFuera = totalVentas;
+      const ventasNoZon = 0;
 
       const garantizadoParaComisionar = 0;
       const garantizadoConNovedades = 0;
@@ -507,14 +593,15 @@ export async function exportNominaController(req, res) {
         "",
         "FUERA SISTEMA",
         0,
-        daysInMonth,
+        daysInMonthFallback,
         0,
         "",
-        daysInMonth,
+        daysInMonthFallback,
         garantizadoParaComisionar,
         garantizadoConNovedades,
         ventasDistrito,
         ventasFuera,
+        ventasNoZon,
         totalVentas,
         0,
         0,
@@ -524,43 +611,36 @@ export async function exportNominaController(req, res) {
     }
 
     // Formatos finales
-for (const ws of [wsNomina, wsFuera]) {
-  applyBordersAll(ws);
-  autoFitColumns(ws);
+    for (const ws of [wsNomina, wsFuera]) {
+      applyBordersAll(ws);
+      autoFitColumns(ws);
 
-  // ---------- Forzar anchos (RH-friendly) ----------
-  // Fechas (G,H) angostas
-  ws.getColumn("G").width = 12;
-  ws.getColumn("H").width = 12;
-  ws.getColumn("J").width = 15; // Estado
+      ws.getColumn("G").width = 12;
+      ws.getColumn("H").width = 12;
+      ws.getColumn("J").width = 15;
 
-  // Días / prorrateo / garantizados (K-Q) más angostos
-  ws.getColumn("K").width = 12; // presupuesto
-  ws.getColumn("L").width = 18;// días
-  ws.getColumn("M").width = 18; // prorrateo
-  ws.getColumn("O").width = 18; // días (2)
-  ws.getColumn("P").width = 18; // garantizado
-  ws.getColumn("Q").width = 18; // garantizado con novedades
+      ws.getColumn("K").width = 12;
+      ws.getColumn("L").width = 18;
+      ws.getColumn("M").width = 18;
+      ws.getColumn("O").width = 18;
+      ws.getColumn("P").width = 18;
+      ws.getColumn("Q").width = 18;
 
-  // Ventas / diferencias (R-V) angostas
-  ws.getColumn("R").width = 10;
-  ws.getColumn("S").width = 10;
-  ws.getColumn("T").width = 10;
-  ws.getColumn("U").width = 12;
-  ws.getColumn("V").width = 12;
+      ws.getColumn("R").width = 10;
+      ws.getColumn("S").width = 10;
+      ws.getColumn("T").width = 14;
+      ws.getColumn("U").width = 10;
+      ws.getColumn("V").width = 12;
+      ws.getColumn("W").width = 12;
 
-  // Cumple (W,X) angostas
-  ws.getColumn("W").width = 18;
-  ws.getColumn("X").width = 18;
+      ws.getColumn("X").width = 18;
+      ws.getColumn("Y").width = 18;
 
-  // Campos largos controlados
-  ws.getColumn("C").width = 28; // nombre
-  ws.getColumn("I").width = 40; // novedades
+      ws.getColumn("C").width = 28;
+      ws.getColumn("I").width = 40;
+    }
 
-}
-
-
-    // Hoja resumen (opcional pero útil para validar)
+    // Hoja resumen
     const wsResumen = wb.addWorksheet("RESUMEN");
     wsResumen.addRow(["METRICA", "VALOR"]);
     wsResumen.getRow(1).font = { bold: true };
@@ -580,16 +660,42 @@ for (const ws of [wsNomina, wsFuera]) {
       [yy, mm]
     );
 
+    const totalNoZon = await pool.query(
+      `
+      SELECT COALESCE(SUM(p.real_unzoned_count),0)::int AS total_no_zonificadas
+      FROM core.progress p
+      JOIN core.users u ON u.id = p.user_id
+      WHERE p.period_year=$1 AND p.period_month=$2
+        AND u.role='ASESORIA' AND u.active=true
+      `,
+      [yy, mm]
+    );
+
     wsResumen.addRow(["PERIODO", periodStr]);
-    wsResumen.addRow(["TOTAL DE CONEXIONES", Number(totalFull.rows[0]?.filas || 0)]);
+    wsResumen.addRow(["TOTAL DE CONEXIONES (FULL_SALES)", Number(totalFull.rows[0]?.filas || 0)]);
     wsResumen.addRow(["CONEXIONES POR USUARIOS EN NOMINA", Number(withUser.rows[0]?.filas || 0)]);
-    wsResumen.addRow(["CONEXIONES POR USUARIOS FUERA DE NOMINA", fueraSistema.reduce((a, x) => a + Number(x.total_ventas || 0), 0)]);
+    wsResumen.addRow([
+      "CONEXIONES POR USUARIOS FUERA DE NOMINA",
+      fueraSistema.reduce((a, x) => a + Number(x.total_ventas || 0), 0)
+    ]);
+    wsResumen.addRow(["TOTAL VENTAS NO ZONIFICADAS (PROGRESS)", Number(totalNoZon.rows[0]?.total_no_zonificadas || 0)]);
+
+    wsResumen.addRow([
+      "AUTO: MONTHLY BACKFILL (UPSERT ATTEMPTED)",
+      Number(auto?.monthly_backfill?.upsert_attempted || 0)
+    ]);
+    wsResumen.addRow(["AUTO: PROGRESS RECALC (UPSERTED)", Number(auto?.progress_recalc?.upserted || 0)]);
+    wsResumen.addRow(["AUTO: PROGRESS MATCHED USERS", Number(auto?.progress_recalc?.matched_users || 0)]);
+    wsResumen.addRow(["AUTO: THRESHOLD %", Number(auto?.progress_recalc?.threshold_percent ?? 100)]);
 
     autoFitColumns(wsResumen);
     applyBordersAll(wsResumen);
 
     // Export
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
     res.setHeader("Content-Disposition", `attachment; filename="Nomina-${periodStr}.xlsx"`);
 
     await wb.xlsx.write(res);

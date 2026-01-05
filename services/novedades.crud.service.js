@@ -1,3 +1,4 @@
+// services/novedades.crud.service.js
 import pool from "../config/database.js";
 import { promoteSiappFromFullSales } from "./promote.siapp.service.js";
 
@@ -68,7 +69,6 @@ async function resolveScopeUserIds(client, authUser) {
   }
 
   // DIRECCION/GERENCIA/otros admin: por ahora permitimos todo
-  // (Luego lo conectamos a tu "archUnit" real si quieres acotar)
   const { rows } = await client.query(`SELECT id FROM core.users`);
   return rows.map((r) => Number(r.id));
 }
@@ -143,11 +143,42 @@ async function getDaysInMonth(client, year, month) {
   return Number(rows[0]?.dim || 30);
 }
 
+/**
+ * Presupuesto base (source of truth): core.budgets
+ * - period: 'YYYY-MM'
+ * - budget_amount: entero (numeric(14,0))
+ * - status: idealmente ACTIVE (ya lo migraste)
+ */
+async function getBaseBudgetFromBudgets(client, userId, periodStr) {
+  const { rows } = await client.query(
+    `
+    SELECT b.budget_amount
+    FROM core.budgets b
+    WHERE b.user_id = $1
+      AND b.period = $2
+      AND (b.status = 'ACTIVE' OR b.status IS NULL)
+    ORDER BY b.updated_at DESC NULLS LAST, b.id DESC
+    LIMIT 1
+    `,
+    [userId, periodStr]
+  );
+
+  if (!rows[0] || rows[0].budget_amount == null) return null;
+  const n = Number(rows[0].budget_amount);
+  return Number.isFinite(n) ? n : null;
+}
+
 async function recalcUserMonthlyForPeriod(client, userId, year, month) {
   const daysInMonth = await getDaysInMonth(client, year, month);
   const nonWorked = await countNonWorkedDaysInMonth(client, userId, year, month);
   const diasLaborados = Math.max(daysInMonth - nonWorked, 0);
 
+  const periodStr = `${year}-${String(month).padStart(2, "0")}`;
+
+  // 1) Source of truth: core.budgets (presupuesto base)
+  const budgetBase = await getBaseBudgetFromBudgets(client, userId, periodStr);
+
+  // 2) Si no existe budget, conservamos el valor anterior de user_monthly (si existe), si no fallback 13
   const { rows: umRows } = await client.query(
     `
     SELECT presupuesto_mes
@@ -159,15 +190,18 @@ async function recalcUserMonthlyForPeriod(client, userId, year, month) {
   );
 
   const presupuestoMes =
-    umRows.length > 0 && umRows[0].presupuesto_mes != null
-      ? Number(umRows[0].presupuesto_mes)
-      : 13;
+    budgetBase != null
+      ? budgetBase
+      : (umRows.length > 0 && umRows[0].presupuesto_mes != null
+          ? Number(umRows[0].presupuesto_mes)
+          : 13);
 
   const prorrateo =
     presupuestoMes > 0
       ? Number(((presupuestoMes * diasLaborados) / daysInMonth).toFixed(4))
       : 0;
 
+  // Guardar mensual (presupuesto_mes es base del mes; dias/prorrateo dependen de novedades)
   await client.query(
     `
     INSERT INTO core.user_monthly (
@@ -178,7 +212,7 @@ async function recalcUserMonthlyForPeriod(client, userId, year, month) {
     VALUES ($1,$2,$3,$4,$5,$6, now())
     ON CONFLICT (user_id, period_year, period_month)
     DO UPDATE SET
-      presupuesto_mes = COALESCE(core.user_monthly.presupuesto_mes, EXCLUDED.presupuesto_mes),
+      presupuesto_mes = EXCLUDED.presupuesto_mes,
       dias_laborados  = EXCLUDED.dias_laborados,
       prorrateo       = EXCLUDED.prorrateo,
       updated_at      = now()
@@ -187,7 +221,7 @@ async function recalcUserMonthlyForPeriod(client, userId, year, month) {
   );
 
   return {
-    period: `${year}-${String(month).padStart(2, "0")}`,
+    period: periodStr,
     days_in_month: daysInMonth,
     non_worked_days: nonWorked,
     dias_laborados: diasLaborados,
@@ -229,7 +263,6 @@ export async function listNovelties({ authUser, date_from, date_to, q, limit = 5
     const dt = date_to ? toISODateOnly(date_to) : null;
     const qq = q != null ? String(q) : null;
 
-    // total
     const { rows: totalRows } = await client.query(
       `
       SELECT COUNT(*)::int AS total
@@ -363,8 +396,10 @@ export async function updateNovelty({ authUser, id, patch }) {
     const nextType =
       patch?.novelty_type != null ? String(patch.novelty_type).trim() : current.novelty_type;
 
-    const nextStart = patch?.start_date != null ? toISODateOnly(patch.start_date) : toISODateOnly(current.start_date);
-    const nextEnd = patch?.end_date != null ? toISODateOnly(patch.end_date) : toISODateOnly(current.end_date);
+    const nextStart =
+      patch?.start_date != null ? toISODateOnly(patch.start_date) : toISODateOnly(current.start_date);
+    const nextEnd =
+      patch?.end_date != null ? toISODateOnly(patch.end_date) : toISODateOnly(current.end_date);
 
     const nextNotes = patch?.notes !== undefined ? (patch.notes ?? null) : current.notes;
 
@@ -380,7 +415,6 @@ export async function updateNovelty({ authUser, id, patch }) {
       throw err;
     }
 
-    // Validar solapes (excluyendo esta misma novedad)
     const overlaps = await findOverlapsExcludingId(client, current.user_id, nextStart, nextEnd, id);
     if (overlaps.length > 0) {
       const err = new Error("No se puede actualizar: el rango se solapa con una novedad existente.");
@@ -390,7 +424,6 @@ export async function updateNovelty({ authUser, id, patch }) {
       throw err;
     }
 
-    // Actualizar
     let updated;
     try {
       const { rows } = await client.query(
@@ -408,7 +441,6 @@ export async function updateNovelty({ authUser, id, patch }) {
       );
       updated = rows[0];
     } catch (pgErr) {
-      // chocó contra unique (user_id, novelty_type, start_date, end_date)
       if (pgErr?.code === "23505") {
         const err = new Error("Conflicto de unicidad: ya existe una novedad igual para ese usuario.");
         err.status = 409;
@@ -418,7 +450,6 @@ export async function updateNovelty({ authUser, id, patch }) {
       throw pgErr;
     }
 
-    // Recalcular months tocados: antes y después
     const prevStart = toISODateOnly(current.start_date);
     const prevEnd = toISODateOnly(current.end_date);
 
@@ -433,7 +464,6 @@ export async function updateNovelty({ authUser, id, patch }) {
 
     await client.query("COMMIT");
 
-    // progress fuera de tx
     const progress_recalc = await recalcProgressForMonths(months);
 
     return { ok: true, novelty: updated, monthly_updates, progress_recalc };
@@ -453,14 +483,12 @@ export async function deleteNovelty({ authUser, id }) {
 
     const { novelty: current } = await ensureNoveltyInScope(client, authUser, id);
 
-    // Capturar meses antes de borrar
     const startISO = toISODateOnly(current.start_date);
     const endISO = toISODateOnly(current.end_date);
     const months = monthsBetween(startISO, endISO);
 
     await client.query(`DELETE FROM core.user_novelties WHERE id=$1`, [id]);
 
-    // Recalcular monthly (puede subir dias_laborados al quitar novedad)
     const monthly_updates = [];
     for (const m of months) {
       monthly_updates.push(await recalcUserMonthlyForPeriod(client, current.user_id, m.year, m.month));

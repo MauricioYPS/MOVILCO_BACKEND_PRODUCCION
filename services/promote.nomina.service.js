@@ -33,64 +33,9 @@ function overlapsMonth(contract_start, contract_end, year, month) {
   return cs <= periodEnd && ce >= periodStart;
 }
 
-async function findOrgUnitForDistrict(client, district) {
-  const q = `%${district}%`;
-
-  // 1) COORDINACION
-  {
-    const { rows } = await client.query(
-      `SELECT id
-       FROM core.org_units
-       WHERE unit_type = 'COORDINACION' AND name ILIKE $1
-       ORDER BY id
-       LIMIT 1`,
-      [q]
-    );
-    if (rows[0]) return rows[0].id;
-  }
-
-  // 2) DIRECCION
-  {
-    const { rows } = await client.query(
-      `SELECT id
-       FROM core.org_units
-       WHERE unit_type = 'DIRECCION' AND name ILIKE $1
-       ORDER BY id
-       LIMIT 1`,
-      [q]
-    );
-    if (rows[0]) return rows[0].id;
-  }
-
-  return null;
-}
-
-async function getFallbackOrgUnitId(client) {
-  {
-    const { rows } = await client.query(
-      `SELECT id
-       FROM core.org_units
-       WHERE unit_type = 'DIRECCION'
-       ORDER BY id
-       LIMIT 1`
-    );
-    if (rows[0]) return rows[0].id;
-  }
-  {
-    const { rows } = await client.query(
-      `SELECT id
-       FROM core.org_units
-       ORDER BY id
-       LIMIT 1`
-    );
-    if (rows[0]) return rows[0].id;
-  }
-  throw new Error("No existe ningún registro en core.org_units para usar como fallback.");
-}
-
 async function getUserByDocument(client, document_id) {
   const { rows } = await client.query(
-    `SELECT id, email, active
+    `SELECT id, email, active, en_presupuesto
      FROM core.users
      WHERE document_id = $1
      LIMIT 1`,
@@ -99,99 +44,14 @@ async function getUserByDocument(client, document_id) {
   return rows[0] || null;
 }
 
-async function createUserFromNomina(client, payload) {
-  const {
-    org_unit_id,
-    name,
-    email,
-    phone,
-    role,
-    password_hash,
-    document_id,
-    district,
-    district_claro,
-    contract_start,
-    contract_end,
-    contratado_flag
-  } = payload;
-
-  const safeEmail = email ? String(email).toLowerCase() : `${document_id || "sinid"}@movilco.local`;
-
-  const { rows } = await client.query(
-    `INSERT INTO core.users
-      (org_unit_id, name, email, phone, role, password_hash,
-       document_id, district, district_claro, contract_start, contract_end,
-       active, contratado)
-     VALUES ($1,$2,$3,$4,$5,$6,
-             $7,$8,$9,$10,$11,
-             true, $12)
-     RETURNING id`,
-    [
-      org_unit_id,
-      name,
-      safeEmail,
-      phone ?? null,
-      role || "ASESORIA",
-      password_hash || "pending-hash",
-      document_id || null,
-      district || null,
-      district_claro || null,
-      contract_start || null,
-      contract_end || null,
-      contratado_flag === true // info, no gobierna active
-    ]
-  );
-
-  return rows[0].id;
+// DESHABILITADA A PROPÓSITO: ya NO se crean usuarios desde nómina.
+async function createUserFromNomina() {
+  throw new Error("createUserFromNomina() está deshabilitada: los usuarios NO se crean desde nómina.");
 }
 
-async function updateUserFromNomina(client, userId, payload) {
-  const {
-    org_unit_id,
-    name,
-    email,
-    phone,
-    role,
-    document_id,
-    district,
-    district_claro,
-    contract_start,
-    contract_end,
-    contratado_flag
-  } = payload;
-
-  const safeEmail = email ? String(email).toLowerCase() : null;
-
-  await client.query(
-    `UPDATE core.users
-     SET org_unit_id    = COALESCE($1, org_unit_id),
-         name           = COALESCE($2, name),
-         email          = COALESCE($3, email),
-         phone          = COALESCE($4, phone),
-         role           = COALESCE($5, role),
-         document_id    = COALESCE($6, document_id),
-         district       = COALESCE($7, district),
-         district_claro = COALESCE($8, district_claro),
-         contract_start = COALESCE($9, contract_start),
-         contract_end   = COALESCE($10, contract_end),
-         contratado     = COALESCE($11, contratado),
-         updated_at     = now()
-     WHERE id = $12`,
-    [
-      org_unit_id || null,
-      name || null,
-      safeEmail,
-      phone ?? null,
-      role || null,
-      document_id || null,
-      district || null,
-      district_claro || null,
-      contract_start || null,
-      contract_end || null,
-      (contratado_flag === true || contratado_flag === false) ? contratado_flag : null,
-      userId
-    ]
-  );
+// Nota: la dejamos por compatibilidad histórica, pero NO se usa.
+async function updateUserFromNomina() {
+  throw new Error("updateUserFromNomina() está deshabilitada: nómina NO debe modificar core.users.");
 }
 
 async function upsertUserMonthly(client, userId, year, month, metric) {
@@ -240,15 +100,11 @@ export async function promoteNominaFromStaging({ period_year, period_month }) {
   try {
     await client.query("BEGIN");
 
-    const fallbackOrgUnitId = await getFallbackOrgUnitId(client);
-
     const { rows } = await client.query(`
       SELECT
         NULLIF(TRIM(cedula), '')                AS document_id,
         NULLIF(TRIM(nombre_funcionario), '')    AS nombre_funcionario,
         NULLIF(TRIM(contratado), '')            AS contratado,
-        NULLIF(TRIM(distrito), '')              AS distrito,
-        NULLIF(TRIM(distrito_claro), '')        AS distrito_claro,
         fecha_inicio_contrato,
         fecha_fin_contrato,
         NULLIF(TRIM(novedad), '')               AS novedad,
@@ -260,10 +116,15 @@ export async function promoteNominaFromStaging({ period_year, period_month }) {
       ORDER BY cedula ASC NULLS LAST
     `);
 
-    let created = 0;
-    let updated = 0;
-    let noDistrictMatch = 0;
+    // Contadores
+    let created = 0; // debe quedar en 0 siempre
+    let updated = 0; // debe quedar en 0 siempre
     let skippedNoDocument = 0;
+    let skippedMissingUser = 0;
+    let userMonthlyUpserted = 0;
+
+    // Evidencia para auditoría / soporte
+    const missing_users = [];
 
     for (const r of rows) {
       const documentId = r.document_id || null;
@@ -276,51 +137,27 @@ export async function promoteNominaFromStaging({ period_year, period_month }) {
       const contratadoFlag = parseContratado(r.contratado); // true/false/null
       const cStart = r.fecha_inicio_contrato || null;
       const cEnd = r.fecha_fin_contrato || null;
-      const district = r.distrito || null;
-      const districtClaro = r.distrito_claro || null;
 
       // Activo mensual (no toca core.users.active)
-      // Si contratadoFlag es null, lo tratamos como “sin dato” -> true para no bloquear.
       const contratadoEff = (contratadoFlag === null) ? true : contratadoFlag;
       const activoEnPeriodo = contratadoEff && overlapsMonth(cStart, cEnd, period_year, period_month);
 
-      let org_unit_id = null;
-      if (districtClaro) org_unit_id = await findOrgUnitForDistrict(client, districtClaro);
-      if (!org_unit_id && district) org_unit_id = await findOrgUnitForDistrict(client, district);
-
-      if (!org_unit_id) {
-        noDistrictMatch++;
-        org_unit_id = fallbackOrgUnitId;
-      }
-
-      const payload = {
-        org_unit_id,
-        name,
-        email: null,
-        phone: null,
-        role: "ASESORIA",
-        password_hash: "pending-hash",
-        document_id: documentId,
-        district,
-        district_claro: districtClaro,
-        contract_start: cStart,
-        contract_end: cEnd,
-        contratado_flag: contratadoFlag
-      };
-
+      // 1) Buscar usuario existente en core.users
       const user = await getUserByDocument(client, documentId);
 
-      let userId;
+      // 2) Si NO existe, NO se crea. Se registra y se omite.
       if (!user) {
-        userId = await createUserFromNomina(client, payload);
-        created++;
-      } else {
-        await updateUserFromNomina(client, user.id, payload);
-        userId = user.id;
-        updated++;
+        skippedMissingUser++;
+        missing_users.push({
+          document_id: documentId,
+          nombre: name,
+          motivo: "NO_EXISTE_EN_CORE_USERS (se omite user_monthly; no se crean usuarios desde nómina)"
+        });
+        continue;
       }
 
-      await upsertUserMonthly(client, userId, period_year, period_month, {
+      // 3) Upsert user_monthly SOLO para usuarios existentes
+      await upsertUserMonthly(client, user.id, period_year, period_month, {
         presupuesto_mes: r.presupuesto_mes,
         dias_laborados: r.dias_laborados,
         prorrateo: r.prorrateo,
@@ -328,10 +165,21 @@ export async function promoteNominaFromStaging({ period_year, period_month }) {
         novedad: r.novedad,
         activo_en_periodo: activoEnPeriodo
       });
+
+      userMonthlyUpserted++;
     }
 
     await client.query("COMMIT");
-    return { created, updated, noDistrictMatch, skippedNoDocument, total: rows.length };
+
+    return {
+      created, // 0
+      updated, // 0
+      user_monthly_upserted: userMonthlyUpserted,
+      skippedNoDocument,
+      skippedMissingUser,
+      missing_users_sample: missing_users.slice(0, 100),
+      total: rows.length
+    };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
