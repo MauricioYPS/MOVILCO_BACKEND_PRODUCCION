@@ -23,6 +23,7 @@ import siappRouter from './siapp.js'
 import synRouter from './sync.js'
 import novedadesRouter from './novedades.js'
 import catalogRouter from './catalog.js'
+import budgetsRouter from './budgets.js'
 
 const router = Router()
 
@@ -50,5 +51,6 @@ router.use('/siapp' ,siappRouter)
 router.use('/sync' ,synRouter)
 router.use('/novedades', novedadesRouter)
 router.use('/catalog', catalogRouter)
+router.use('/budgets', budgetsRouter)
 
 export default router

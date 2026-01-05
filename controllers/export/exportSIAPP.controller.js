@@ -1,10 +1,10 @@
+// controllers/export/exportSIAPP.controller.js
 import ExcelJS from "exceljs";
 import pool from "../../config/database.js";
 
 // ======================================================
 // Helpers
 // ======================================================
-
 function styleHeader(ws) {
   const header = ws.getRow(1);
   header.height = 22;
@@ -26,7 +26,7 @@ function styleHeader(ws) {
   });
 }
 
-function applyFullBorders(ws, rowCount, colCount) {
+function applyFullBorders(ws, rowCount) {
   for (let r = 1; r <= rowCount; r++) {
     ws.getRow(r).eachCell({ includeEmpty: true }, (cell) => {
       cell.border = {
@@ -46,29 +46,71 @@ function autoFitColumns(ws) {
       const text = cell.value ? String(cell.value) : "";
       max = Math.max(max, text.length + 2);
     });
-    col.width = max;
+    col.width = Math.min(Math.max(max, 10), 60);
   });
 }
 
 // ======================================================
 // CONTROLADOR EXPORTAR SIAPP
+// Endpoint: /api/export/siapp?period=YYYY-MM
 // ======================================================
-
 export async function exportSIAPPController(req, res) {
   try {
     const { period } = req.query;
 
-    if (!period || !/^\d{4}-\d{2}$/.test(period))
-      return res.status(400).json({ ok: false, error: "Periodo inválido" });
+    if (!period || !/^\d{4}-\d{2}$/.test(String(period))) {
+      return res.status(400).json({ ok: false, error: "Periodo inválido. Use YYYY-MM" });
+    }
 
-    const [yy, mm] = period.split("-").map(Number);
+    const [yy, mm] = String(period).split("-").map(Number);
 
+    // OJO: Exportamos desde la fuente real del mes
+    // Ajusta si tu sistema usa otra tabla como fuente (pero por lo que cuentas, debe ser full_sales).
     const { rows } = await pool.query(
       `
-      SELECT *
-      FROM siapp.all_sales_view
-      WHERE (period_year = $1 AND period_month = $2)
-         OR (EXTRACT(YEAR FROM fecha) = $1 AND EXTRACT(MONTH FROM fecha) = $2)
+      SELECT
+        estado_liquidacion,
+        linea_negocio,
+        cuenta,
+        ot,
+        idasesor,
+        nombreasesor,
+        cantserv,
+        tipored,
+        division,
+        area,
+        zona,
+        poblacion,
+        d_distrito,
+        renta,
+        fecha,
+        venta,
+        tipo_registro,
+        estrato,
+        paquete_pvd,
+        mintic,
+        tipo_prodcuto,
+        ventaconvergente,
+        venta_instale_dth,
+        sac_final,
+        cedula_vendedor,
+        nombre_vendedor,
+        modalidad_venta,
+        tipo_vendedor,
+        tipo_red_comercial,
+        nombre_regional,
+        nombre_comercial,
+        nombre_lider,
+        retencion_control,
+        observ_retencion,
+        tipo_contrato,
+        tarifa_venta,
+        comision_neta,
+        punto_equilibrio
+      FROM siapp.full_sales
+      WHERE period_year = $1
+        AND period_month = $2
+      ORDER BY fecha NULLS LAST, idasesor NULLS LAST, ot NULLS LAST
       `,
       [yy, mm]
     );
@@ -90,79 +132,31 @@ export async function exportSIAPPController(req, res) {
 
     ws.addRow(headers);
 
-    for (const r of rows) {
-      ws.addRow([
-        r.estado_liquidacion,
-        r.linea_negocio,
-        r.cuenta,
-        r.ot,
-        r.idasesor,
-        r.nombreasesor,
-        Number(r.cantserv),
-        r.tipored,
-        r.division,
-        r.area,
-        r.zona,
-        r.poblacion,
-        r.d_distrito,
-        Number(r.renta),
-        r.fecha,
-        r.venta,
-        r.tipo_registro,
-        r.estrato,
-        r.paquete_pvd,
-        r.mintic,
-        r.tipo_prodcuto,
-        r.ventaconvergente,
-        r.venta_instale_dth,
-        r.sac_final,
-        r.cedula_vendedor,
-        r.nombre_vendedor,
-        r.modalidad_venta,
-        r.tipo_vendedor,
-        r.tipo_red_comercial,
-        r.nombre_regional,
-        r.nombre_comercial,
-        r.nombre_lider,
-        r.retencion_control,
-        r.observ_retencion,
-        r.tipo_contrato,
-        Number(r.tarifa_venta),
-        Number(r.comision_neta),
-        Number(r.punto_equilibrio)
-      ]);
-    }
-
-    // Estilos
-    styleHeader(ws);
-    autoFitColumns(ws);
-
-    // Convertir a tabla
     ws.addTable({
       name: "TablaSiapp",
       ref: "A1",
       headerRow: true,
       style: {
         theme: "TableStyleMedium2",
-        showRowStripes: true,
+        showRowStripes: true
       },
-      columns: headers.map(h => ({ name: h })),
-      rows: rows.map(r => [
+      columns: headers.map((h) => ({ name: h })),
+      rows: rows.map((r) => ([
         r.estado_liquidacion,
         r.linea_negocio,
         r.cuenta,
         r.ot,
         r.idasesor,
         r.nombreasesor,
-        Number(r.cantserv),
+        r.cantserv != null ? Number(r.cantserv) : null,
         r.tipored,
         r.division,
         r.area,
         r.zona,
         r.poblacion,
         r.d_distrito,
-        Number(r.renta),
-        r.fecha,
+        r.renta != null ? Number(r.renta) : null,
+        r.fecha, // si es date/timestamp en DB, ExcelJS lo respeta como Date si viene como Date
         r.venta,
         r.tipo_registro,
         r.estrato,
@@ -183,24 +177,27 @@ export async function exportSIAPPController(req, res) {
         r.retencion_control,
         r.observ_retencion,
         r.tipo_contrato,
-        Number(r.tarifa_venta),
-        Number(r.comision_neta),
-        Number(r.punto_equilibrio)
-      ])
+        r.tarifa_venta != null ? Number(r.tarifa_venta) : null,
+        r.comision_neta != null ? Number(r.comision_neta) : null,
+        r.punto_equilibrio != null ? Number(r.punto_equilibrio) : null
+      ]))
     });
 
-    // Bordes de toda la tabla
-    applyFullBorders(ws, ws.rowCount, headers.length);
+    styleHeader(ws);
+    autoFitColumns(ws);
+    applyFullBorders(ws, ws.rowCount);
 
-    // Exportar
-    res.setHeader("Content-Type", "application/vnd.openxmlformats");
-    res.setHeader("Content-Disposition",
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
       `attachment; filename="SIAPP-${period}.xlsx"`
     );
 
     await wb.xlsx.write(res);
     res.end();
-
   } catch (e) {
     console.error("EXPORT SIAPP ERROR:", e);
     res.status(500).json({ ok: false, error: e.message });
