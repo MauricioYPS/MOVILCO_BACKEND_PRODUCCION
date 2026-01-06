@@ -80,6 +80,7 @@ export async function getUserFullProfile(req, res) {
 `;
 
             const coordRes = await pool.query(coordQuery, [orgUnit.id]);
+            
             coordinador = coordRes.rows[0] || null;
         }
 
