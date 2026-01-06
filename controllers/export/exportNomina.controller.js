@@ -672,21 +672,21 @@ export async function exportNominaController(req, res) {
     );
 
     wsResumen.addRow(["PERIODO", periodStr]);
-    wsResumen.addRow(["TOTAL DE CONEXIONES (FULL_SALES)", Number(totalFull.rows[0]?.filas || 0)]);
+    wsResumen.addRow(["TOTAL DE CONEXIONES ", Number(totalFull.rows[0]?.filas || 0)]);
     wsResumen.addRow(["CONEXIONES POR USUARIOS EN NOMINA", Number(withUser.rows[0]?.filas || 0)]);
     wsResumen.addRow([
       "CONEXIONES POR USUARIOS FUERA DE NOMINA",
       fueraSistema.reduce((a, x) => a + Number(x.total_ventas || 0), 0)
     ]);
-    wsResumen.addRow(["TOTAL VENTAS NO ZONIFICADAS (PROGRESS)", Number(totalNoZon.rows[0]?.total_no_zonificadas || 0)]);
+    wsResumen.addRow(["TOTAL VENTAS NO ZONIFICADAS", Number(totalNoZon.rows[0]?.total_no_zonificadas || 0)]);
 
-    wsResumen.addRow([
-      "AUTO: MONTHLY BACKFILL (UPSERT ATTEMPTED)",
-      Number(auto?.monthly_backfill?.upsert_attempted || 0)
-    ]);
-    wsResumen.addRow(["AUTO: PROGRESS RECALC (UPSERTED)", Number(auto?.progress_recalc?.upserted || 0)]);
-    wsResumen.addRow(["AUTO: PROGRESS MATCHED USERS", Number(auto?.progress_recalc?.matched_users || 0)]);
-    wsResumen.addRow(["AUTO: THRESHOLD %", Number(auto?.progress_recalc?.threshold_percent ?? 100)]);
+    // wsResumen.addRow([
+    //   "AUTO: MONTHLY BACKFILL (UPSERT ATTEMPTED)",
+    //   Number(auto?.monthly_backfill?.upsert_attempted || 0)
+    // ]);
+    // wsResumen.addRow(["AUTO: PROGRESS RECALC (UPSERTED)", Number(auto?.progress_recalc?.upserted || 0)]);
+    // wsResumen.addRow(["AUTO: PROGRESS MATCHED USERS", Number(auto?.progress_recalc?.matched_users || 0)]);
+    // wsResumen.addRow(["AUTO: THRESHOLD %", Number(auto?.progress_recalc?.threshold_percent ?? 100)]);
 
     autoFitColumns(wsResumen);
     applyBordersAll(wsResumen);

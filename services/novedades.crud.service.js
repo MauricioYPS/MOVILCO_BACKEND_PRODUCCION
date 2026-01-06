@@ -41,6 +41,9 @@ function unionMonths(a, b) {
 }
 
 /** ===== scope por rol ===== */
+/** ===== scope por rol ===== */
+/** ===== scope por rol ===== */
+/** ===== scope por rol ===== */
 async function resolveScopeUserIds(client, authUser) {
   const userId = Number(authUser?.id);
   const role = String(authUser?.role || "").toUpperCase();
@@ -54,7 +57,7 @@ async function resolveScopeUserIds(client, authUser) {
   // ASESORIA: solo él mismo
   if (role === "ASESORIA") return [userId];
 
-  // COORDINACION: él mismo + asesores que tengan coordinator_id = él
+  // COORDINACION: él mismo + asesores directos
   if (role === "COORDINACION") {
     const { rows } = await client.query(
       `
@@ -68,10 +71,51 @@ async function resolveScopeUserIds(client, authUser) {
     return rows.map((r) => Number(r.id));
   }
 
-  // DIRECCION/GERENCIA/otros admin: por ahora permitimos todo
-  const { rows } = await client.query(`SELECT id FROM core.users`);
-  return rows.map((r) => Number(r.id));
+  // DIRECCION: todo su subárbol (su org_unit + coordinaciones/distritos hijos, etc.)
+  if (role === "DIRECCION") {
+    const { rows } = await client.query(
+      `
+      WITH RECURSIVE tree AS (
+        SELECT ou.id
+        FROM core.org_units ou
+        JOIN core.users u ON u.org_unit_id = ou.id
+        WHERE u.id = $1
+
+        UNION ALL
+
+        SELECT child.id
+        FROM core.org_units child
+        JOIN tree t ON child.parent_id = t.id
+      )
+      SELECT u.id
+      FROM core.users u
+      WHERE u.org_unit_id IN (SELECT id FROM tree)
+      `,
+      [userId]
+    );
+
+    if (!rows?.length) return [userId]; // fallback seguro
+    return rows.map((r) => Number(r.id));
+  }
+
+  // GERENCIA: puede ver todo (como tu regla de negocio)
+  if (role === "GERENCIA") {
+    const { rows } = await client.query(`SELECT id FROM core.users`);
+    return rows.map((r) => Number(r.id));
+  }
+
+  // ADMIN: normalmente todo
+  if (role === "ADMIN") {
+    const { rows } = await client.query(`SELECT id FROM core.users`);
+    return rows.map((r) => Number(r.id));
+  }
+
+  // Fallback seguro
+  return [userId];
 }
+
+
+
 
 async function ensureNoveltyInScope(client, authUser, noveltyId) {
   const scopeIds = await resolveScopeUserIds(client, authUser);

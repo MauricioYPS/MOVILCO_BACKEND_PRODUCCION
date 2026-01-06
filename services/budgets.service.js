@@ -67,6 +67,30 @@ function normalizeBudgetRow(r) {
   };
 }
 
+
+async function syncLegacyUserBudget(client, userId, budgetAmount) {
+  const uid = Number(userId);
+  if (!Number.isFinite(uid) || uid <= 0) return;
+
+  const amount = toIntNonNeg(budgetAmount, 0);
+
+  // Solo sincronizamos presupuesto legacy para asesores
+  await client.query(
+    `
+    UPDATE core.users u
+    SET
+      presupuesto = $2::numeric,
+      ejecutado = COALESCE(u.ejecutado, 0),
+      cierre_porcentaje = COALESCE(u.cierre_porcentaje, 0),
+      updated_at = now()
+    WHERE u.id = $1
+      AND u.role = 'ASESORIA'
+    `,
+    [uid, amount]
+  );
+}
+
+
 /* =========================================================
    Monthly recalculation (dias/prorrateo) AUTORIZADO por budgets+novelties
    - Source of truth presupuesto_mes: core.budgets
@@ -154,8 +178,8 @@ async function recalcUserMonthlyForPeriod(client, userId, year, month, scopeStr 
     budgetBase != null
       ? budgetBase
       : (umRows.length > 0 && umRows[0].presupuesto_mes != null
-          ? Number(umRows[0].presupuesto_mes)
-          : 13);
+        ? Number(umRows[0].presupuesto_mes)
+        : 13);
 
   const prorrateo =
     presupuestoMes > 0
@@ -289,14 +313,14 @@ export async function getBudgetsByCoordinator({ period, coordinator_id, scope = 
     cargo: r.cargo,
     budget: r.budget_id
       ? {
-          id: Number(r.budget_id),
-          period: r.period,
-          scope: r.scope,
-          budget_amount: Number(r.budget_amount || 0),
-          unit: r.unit,
-          status: r.status,
-          updated_at: r.updated_at
-        }
+        id: Number(r.budget_id),
+        period: r.period,
+        scope: r.scope,
+        budget_amount: Number(r.budget_amount || 0),
+        unit: r.unit,
+        status: r.status,
+        updated_at: r.updated_at
+      }
       : null
   }));
 
@@ -445,6 +469,10 @@ export async function upsertBudgetsBatch({ period, scope = "MONTHLY", items = []
       `,
       [per.period, sc, JSON.stringify(clean), actor]
     );
+    // Sync legacy (core.users.presupuesto) para asesores afectados
+    for (const r of q.rows) {
+      await syncLegacyUserBudget(client, Number(r.user_id), r.budget_amount);
+    }
 
     // Recalcular user_monthly para usuarios afectados (MISMO TX)
     const affectedUserIds = Array.from(new Set(q.rows.map((r) => Number(r.user_id))));
@@ -538,7 +566,10 @@ export async function updateBudgetById({ id, patch = {}, actor_user_id }) {
     );
 
     const updated = q.rows[0];
+
     if (!updated) throw new Error("Budget no encontrado");
+    await syncLegacyUserBudget(client, Number(updated.user_id), updated.budget_amount);
+
 
     // Recalc user_monthly (mismo TX)
     const per = parsePeriod(updated.period);
@@ -609,6 +640,9 @@ export async function copyBudgetsFromPreviousMonth({ period, scope = "MONTHLY", 
       `,
       [per.period, from, actor, sc]
     );
+    for (const r of q.rows) {
+      await syncLegacyUserBudget(client, Number(r.user_id), r.budget_amount);
+    }
 
     // Recalc monthly para usuarios insertados (mismo TX)
     const affectedUserIds = Array.from(new Set(q.rows.map((r) => Number(r.user_id))));
@@ -775,10 +809,10 @@ export async function getBudgetsTree({ period, scope = "MONTHLY" }) {
 
       node.budgets = agg
         ? {
-            users_count: Number(agg.users_count || 0),
-            budget_total: Number(agg.budget_total || 0),
-            missing_count: Number(agg.missing_count || 0)
-          }
+          users_count: Number(agg.users_count || 0),
+          budget_total: Number(agg.budget_total || 0),
+          missing_count: Number(agg.missing_count || 0)
+        }
         : { users_count: 0, budget_total: 0, missing_count: 0 };
     }
 
