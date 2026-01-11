@@ -377,93 +377,126 @@ export async function exportNominaController(req, res) {
     // HOJA 1: EN SISTEMA (TODOS LOS USERS)
     //  - Se apoya en core.user_monthly (ya calculado y con manual)
     // ============================================================
-    const { rows: nominaUsers } = await pool.query(
-      `
-      WITH bounds AS (
-        SELECT
-          make_date($1::int,$2::int,1)::date AS month_start,
-          (make_date($1::int,$2::int,1) + interval '1 month' - interval '1 day')::date AS month_end,
-          EXTRACT(DAY FROM (make_date($1::int,$2::int,1) + interval '1 month' - interval '1 day'))::int AS days_in_month
-      ),
-      users_sel AS (
-        SELECT
-          u.id,
-          u.document_id::text AS cedula,
-          u.name,
-          u.district,
-          u.district_claro,
-          u.contract_start,
-          u.contract_end,
-          u.contract_status,
-          u.active
-        FROM core.users u
-        WHERE u.role IN ('ASESORIA')
-          AND u.active = true
-      ),
-      nov_days AS (
-        SELECT
-          n.user_id,
-          COUNT(DISTINCT gs::date)::int AS non_worked_days,
-          STRING_AGG(
-            n.novelty_type || ' ' ||
-            to_char(n.start_date,'DD/MM/YYYY') || ' AL ' ||
-            to_char(n.end_date,'DD/MM/YYYY'),
-            ' | '
-            ORDER BY n.start_date ASC
-          ) AS novedades
-        FROM core.user_novelties n
-        CROSS JOIN bounds b
-        CROSS JOIN LATERAL generate_series(
-          GREATEST(n.start_date::date, b.month_start),
-          LEAST(n.end_date::date, b.month_end),
-          interval '1 day'
-        ) gs
-        WHERE n.start_date::date <= b.month_end
-          AND n.end_date::date >= b.month_start
-        GROUP BY n.user_id
-      )
-      SELECT
-        u.id AS user_id,
-        u.cedula,
-        u.name AS funcionario,
-        u.district AS distrito,
-        u.district_claro AS distrito_claro,
-        u.contract_start,
-        u.contract_end,
-        u.contract_status,
-        u.active,
+const { rows: nominaUsers } = await pool.query(
+  `
+  WITH bounds AS (
+    SELECT
+      make_date($1::int,$2::int,1)::date AS month_start,
+      (make_date($1::int,$2::int,1) + interval '1 month' - interval '1 day')::date AS month_end,
+      EXTRACT(DAY FROM (make_date($1::int,$2::int,1) + interval '1 month' - interval '1 day'))::int AS days_in_month
+  ),
+  users_sel AS (
+    SELECT
+      u.id,
+      u.document_id::text AS cedula,
+      u.name,
+      u.district,
+      u.district_claro,
+      u.contract_start,
+      u.contract_end,
+      u.contract_status,
+      u.active
+    FROM core.users u
+    WHERE u.role IN ('ASESORIA')
+      AND u.active = true
+  ),
 
-        COALESCE(um.presupuesto_mes, bu.budget_amount, 0)::numeric AS presupuesto_mes,
-        COALESCE(um.dias_laborados, 0)::int AS dias_laborados,
-        COALESCE(um.prorrateo, 0)::numeric AS prorrateo,
+  -- 1) Novedades del usuario que cruzan el mes (sin expandir por día)
+  nov_span AS (
+    SELECT
+      n.user_id,
+      n.novelty_type,
+      n.start_date::date AS start_date,
+      n.end_date::date AS end_date
+    FROM core.user_novelties n
+    CROSS JOIN bounds b
+    WHERE n.start_date::date <= b.month_end
+      AND n.end_date::date >= b.month_start
+  ),
 
-        COALESCE(nd.non_worked_days, 0)::int AS non_worked_days,
-        COALESCE(nd.novedades,'') AS novedades,
+  -- 2) Conteo de días no laborados (aquí sí expandimos por día)
+  nov_days AS (
+    SELECT
+      ns.user_id,
+      COUNT(DISTINCT gs::date)::int AS non_worked_days
+    FROM nov_span ns
+    CROSS JOIN bounds b
+    CROSS JOIN LATERAL generate_series(
+      GREATEST(ns.start_date, b.month_start),
+      LEAST(ns.end_date, b.month_end),
+      interval '1 day'
+    ) gs
+    GROUP BY ns.user_id
+  ),
 
-        COALESCE(p.real_in_count, 0)::int        AS ventas_distrito,
-        COALESCE(p.real_out_count, 0)::int       AS ventas_fuera,
-        COALESCE(p.real_unzoned_count, 0)::int   AS ventas_no_zonificadas,
-        COALESCE(p.real_total_count, 0)::int     AS total_ventas,
+  -- 3) Texto de novedades (NO usar generate_series, y deduplicar eventos)
+  nov_text AS (
+    SELECT
+      x.user_id,
+      STRING_AGG(
+        x.txt,
+        ' | ' ORDER BY x.start_date ASC, x.end_date ASC, x.novelty_type ASC
+      ) AS novedades
+    FROM (
+      SELECT DISTINCT
+        ns.user_id,
+        ns.start_date,
+        ns.end_date,
+        ns.novelty_type,
+        (trim(ns.novelty_type) || ' ' ||
+          to_char(ns.start_date,'DD/MM/YYYY') || ' AL ' ||
+          to_char(ns.end_date,'DD/MM/YYYY')
+        ) AS txt
+      FROM nov_span ns
+    ) x
+    GROUP BY x.user_id
+  )
 
-        (SELECT days_in_month FROM bounds) AS days_in_month
-      FROM users_sel u
-      LEFT JOIN core.user_monthly um
-        ON um.user_id = u.id
-       AND um.period_year = $1
-       AND um.period_month = $2
-      LEFT JOIN core.budgets bu
-        ON bu.user_id = u.id
-       AND bu.period = $3
-      LEFT JOIN nov_days nd
-        ON nd.user_id = u.id
-      LEFT JOIN core.progress p
-        ON p.user_id = u.id
-       AND p.period_year = $1
-       AND p.period_month = $2
-      ORDER BY total_ventas DESC, funcionario ASC
-      `,
-      [yy, mm, periodStr]
-    );
+  SELECT
+    u.id AS user_id,
+    u.cedula,
+    u.name AS funcionario,
+    u.district AS distrito,
+    u.district_claro AS distrito_claro,
+    u.contract_start,
+    u.contract_end,
+    u.contract_status,
+    u.active,
+
+    COALESCE(um.presupuesto_mes, bu.budget_amount, 0)::numeric AS presupuesto_mes,
+    COALESCE(um.dias_laborados, 0)::int AS dias_laborados,
+    COALESCE(um.prorrateo, 0)::numeric AS prorrateo,
+
+    COALESCE(nd.non_worked_days, 0)::int AS non_worked_days,
+    COALESCE(nt.novedades,'') AS novedades,
+
+    COALESCE(p.real_in_count, 0)::int        AS ventas_distrito,
+    COALESCE(p.real_out_count, 0)::int       AS ventas_fuera,
+    COALESCE(p.real_unzoned_count, 0)::int   AS ventas_no_zonificadas,
+    COALESCE(p.real_total_count, 0)::int     AS total_ventas,
+
+    (SELECT days_in_month FROM bounds) AS days_in_month
+  FROM users_sel u
+  LEFT JOIN core.user_monthly um
+    ON um.user_id = u.id
+   AND um.period_year = $1
+   AND um.period_month = $2
+  LEFT JOIN core.budgets bu
+    ON bu.user_id = u.id
+   AND bu.period = $3
+  LEFT JOIN nov_days nd
+    ON nd.user_id = u.id
+  LEFT JOIN nov_text nt
+    ON nt.user_id = u.id
+  LEFT JOIN core.progress p
+    ON p.user_id = u.id
+   AND p.period_year = $1
+   AND p.period_month = $2
+  ORDER BY total_ventas DESC, funcionario ASC
+  `,
+  [yy, mm, periodStr]
+);
+
 
     // ============================================================
     // HOJA 2: FUERA SISTEMA (sin user) => ventas desde full_sales
