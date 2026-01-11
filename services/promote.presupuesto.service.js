@@ -1,107 +1,162 @@
-import pool from '../config/database.js'
-import { VALID_UNIT_TYPES } from './units.service.js'
+// services/promote.presupuesto.service.js
+import pool from "../config/database.js";
+import { upsertBudgetsBatch } from "./budgets.service.js";
 
-function norm(s) {
-  return String(s ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+function onlyDigits(v) {
+  const s = String(v ?? "").replace(/\D/g, "").trim();
+  return s === "" ? null : s;
 }
 
-
-async function findOrgUnitByName(client, name) {
-  const q = `%${name}%`
-  const { rows } = await client.query(
-    `SELECT id, unit_type FROM core.org_units
-     WHERE name ILIKE $1
-     ORDER BY CASE
-       WHEN unit_type='GERENCIA' THEN 1
-       WHEN unit_type='DIRECCION' THEN 2
-       WHEN unit_type='COORDINACION' THEN 3
-       ELSE 4 END
-     LIMIT 1`,
-    [q]
-  )
-  return rows[0] || null
+function parsePeriod(period) {
+  const p = String(period || "").trim();
+  const m = p.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  if (!m) return null;
+  return { period: p };
 }
 
-async function upsertGoal(client, period_year, period_month, org_unit_id, unit_type, product_line, target_amount) {
-  const { rows } = await client.query(
-    `INSERT INTO core.goals (period_year, period_month, product_line, target_amount, scope_level, scope_id)
-     VALUES ($1,$2,$3,$4,'ORG_UNIT',$5)
-     ON CONFLICT (period_year, period_month, scope_level, scope_id)
-     DO UPDATE SET target_amount = EXCLUDED.target_amount
-     RETURNING id`,
-    [period_year, period_month, product_line || 'GENERAL', target_amount, org_unit_id]
-  )
-  return rows[0].id
+function toIntNonNeg(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(Math.trunc(n), 0);
 }
 
-async function createAssignmentsForChildren(client, parent_unit_id, goal_id, target_amount) {
-  const { rows: children } = await client.query(
-    `SELECT id FROM core.org_units WHERE parent_id = $1`,
-    [parent_unit_id]
-  )
-  if (!children.length) return 0
-  const perChild = Number(target_amount) / children.length
-  let inserted = 0
-  for (const c of children) {
-    await client.query(
-      `INSERT INTO core.assignments (goal_id, assigned_to_id, assigned_to_type, assigned_amount)
-       VALUES ($1,$2,'ORG_UNIT',$3)
-       ON CONFLICT (goal_id, assigned_to_id, assigned_to_type)
-       DO UPDATE SET assigned_amount = EXCLUDED.assigned_amount`,
-      [goal_id, c.id, perChild]
+/**
+ * Devuelve una expresión SQL para obtener el nombre desde `raw` (jsonb),
+ * intentando varias keys (incluye keys con espacios al final).
+ */
+function sqlNameFromRaw() {
+  // Nota: ->> retorna text. NULLIF/TRIM evita strings vacíos.
+  return `
+    COALESCE(
+      NULLIF(TRIM(s.raw->>'NOMBRE DE FUNCIONARIO'), ''),
+      NULLIF(TRIM(s.raw->>'NOMBRE DE FUNCIONARIO '), ''),
+      NULLIF(TRIM(s.raw->>'NOMBRE DE FUNCIONARIO  '), ''),
+      NULLIF(TRIM(s.raw->>'NOMBRE FUNCIONARIO'), ''),
+      NULLIF(TRIM(s.raw->>'NOMBRE_FUNCIONARIO'), ''),
+      NULLIF(TRIM(s.raw->>'nombre_funcionario'), ''),
+      NULLIF(TRIM(s.raw->>'NOMBRE'), ''),
+      NULLIF(TRIM(s.raw->>'nombre'), ''),
+      NULLIF(TRIM(s.raw->>'FUNCIONARIO'), ''),
+      'SIN NOMBRE'
     )
-    inserted++
-  }
-  return inserted
+  `;
 }
 
-export async function promotePresupuestoFromStaging({ period_year, period_month }) {
-  if (!period_year || !period_month) throw new Error('Falta periodo')
-  const client = await pool.connect()
+export async function promotePresupuestoFromStaging({ period, batch_id, actor_user_id }) {
+  const per = parsePeriod(period);
+  if (!per) throw new Error("period inválido. Debe ser YYYY-MM (ej: 2026-01)");
+
+  const client = await pool.connect();
   try {
-    await client.query('BEGIN')
-    const { rows } = await client.query(`
-      SELECT
-        NULLIF(TRIM(periodo),'') AS periodo,
-        NULLIF(TRIM(nivel),'')   AS nivel,
-        NULLIF(TRIM(nombre),'')  AS nombre,
-        presupuesto::numeric AS presupuesto
-      FROM staging.presupuesto_jerarquia
-      WHERE presupuesto IS NOT NULL
-    `)
+    // 1) Elegir batch (si no llega, usar el más reciente)
+    let batchToUse = batch_id;
 
-    let createdGoals = 0
-    let updatedGoals = 0
-    let createdAssignments = 0
-
-    for (const r of rows) {
-      const name = r.nombre
-      const presupuesto = Number(r.presupuesto) || 0
-      const nivel = r.nivel ? r.nivel.toUpperCase() : null
-
-      const unit = await findOrgUnitByName(client, name)
-      if (!unit) continue
-
-      const goalId = await upsertGoal(
-        client,
-        period_year,
-        period_month,
-        unit.id,
-        nivel || unit.unit_type,
-        'GENERAL',
-        presupuesto
-      )
-
-      createdGoals++
-      createdAssignments += await createAssignmentsForChildren(client, unit.id, goalId, presupuesto)
+    if (!batchToUse) {
+      const q = await client.query(`
+        SELECT batch_id
+        FROM staging.archivo_presupuesto
+        ORDER BY loaded_at DESC
+        LIMIT 1
+      `);
+      batchToUse = q.rows[0]?.batch_id || null;
     }
 
-    await client.query('COMMIT')
-    return { createdGoals, createdAssignments, totalRows: rows.length }
-  } catch (e) {
-    await client.query('ROLLBACK')
-    throw e
+    if (!batchToUse) {
+      throw new Error("No hay datos en staging.archivo_presupuesto para promover (batch vacío)");
+    }
+
+    // 2) Traer filas del batch + resolver user_id en una sola query
+    // - Normalizamos documento desde staging.cedula (puede traer puntos/espacios)
+    // - Extraemos nombre desde raw (jsonb) para missing_users_sample
+    const { rows } = await client.query(
+      `
+      SELECT
+        NULLIF(regexp_replace(COALESCE(s.cedula::text, ''), '\\D', '', 'g'), '') AS document_id,
+        ${sqlNameFromRaw()} AS nombre,
+        s.presupuesto AS presupuesto,
+        u.id AS user_id
+      FROM staging.archivo_presupuesto s
+      LEFT JOIN core.users u
+        ON u.document_id = regexp_replace(COALESCE(s.cedula::text, ''), '\\D', '', 'g')
+      WHERE s.batch_id = $1
+      ORDER BY s.id ASC
+      `,
+      [batchToUse]
+    );
+
+    // 3) Armar items
+    const total = rows.length;
+    let skippedNoDocument = 0;
+    let skippedMissingUser = 0;
+
+    const missing_users_sample = [];
+    const items = [];
+
+    for (const r of rows) {
+      const document_id = onlyDigits(r.document_id);
+      if (!document_id) {
+        skippedNoDocument++;
+        continue;
+      }
+
+      const amount = toIntNonNeg(r.presupuesto);
+
+      const userId = r.user_id != null ? Number(r.user_id) : null;
+      if (!userId || !Number.isFinite(userId) || userId <= 0) {
+        skippedMissingUser++;
+        if (missing_users_sample.length < 100) {
+          missing_users_sample.push({
+            document_id,
+            nombre: r.nombre || "SIN NOMBRE",
+            presupuesto: amount,
+            motivo: "NO_EXISTE_EN_CORE_USERS",
+          });
+        }
+        continue;
+      }
+
+      items.push({
+        user_id: userId,
+        budget_amount: amount,
+        status: "ACTIVE",
+        unit: "CONNECTIONS",
+      });
+    }
+
+    if (items.length === 0) {
+      return {
+        ok: true,
+        period: per.period,
+        batch_id: batchToUse,
+        total_rows: total,
+        items_valid: 0,
+        skippedNoDocument,
+        skippedMissingUser,
+        missing_users_sample,
+        note: "No hubo items válidos para upsert.",
+      };
+    }
+
+    // 4) Pipeline oficial de budgets (sync legacy + recalc monthly + recalc progress)
+    const upsertResult = await upsertBudgetsBatch({
+      period: per.period,
+      scope: "MONTHLY",
+      items,
+      actor_user_id,
+    });
+
+    return {
+      ok: true,
+      period: per.period,
+      batch_id: batchToUse,
+      total_rows: total,
+      items_valid: items.length,
+      skippedNoDocument,
+      skippedMissingUser,
+      missing_users_sample,
+      budgets_result: upsertResult,
+    };
   } finally {
-    client.release()
+    client.release();
   }
 }
